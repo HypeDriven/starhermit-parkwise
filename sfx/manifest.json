@@ -1,0 +1,86 @@
+[
+  {
+    "name": "vehicle-select",
+    "seconds": 1,
+    "prompt": "A short soft metallic tap, like a fingertip tapping a car roof, with a gentle springy click, dry and close-miked.",
+    "event": "select"
+  },
+  {
+    "name": "vehicle-slide",
+    "seconds": 1,
+    "prompt": "A small toy car being pushed across a wooden tabletop, smooth rolling wheels with a light friction whoosh, ending cleanly.",
+    "event": "move"
+  },
+  {
+    "name": "vehicle-slide-heavy",
+    "seconds": 2,
+    "prompt": "A heavier van sliding slowly over rough asphalt, low tire rumble and gravelly drag that fades to a stop.",
+    "event": "move"
+  },
+  {
+    "name": "bumper-blocked",
+    "seconds": 1,
+    "prompt": "A dull rubbery thud of a car bumper gently bumping into another vehicle, muted impact with no crash.",
+    "event": "invalid"
+  },
+  {
+    "name": "wrong-way-buzz",
+    "seconds": 1,
+    "prompt": "A short low electronic error buzz with a descending pitch, like an arcade machine refusing an input.",
+    "event": "invalid"
+  },
+  {
+    "name": "undo-rewind",
+    "seconds": 1,
+    "prompt": "A quick tape-rewind swoosh played backwards, a soft reverse whoosh that rises and vanishes.",
+    "event": "undo"
+  },
+  {
+    "name": "hint-sparkle",
+    "seconds": 1,
+    "prompt": "A bright two-note glass chime with a light sparkle, like a small bell glinting to reveal a clue.",
+    "event": "hint"
+  },
+  {
+    "name": "hint-ping",
+    "seconds": 1,
+    "prompt": "A single high clear sonar-like ping with a short shimmer tail, clean and helpful in tone.",
+    "event": "hint"
+  },
+  {
+    "name": "gate-fanfare",
+    "seconds": 3,
+    "prompt": "A cheerful rising victory fanfare on bright mallets and brass, four ascending notes ending on a warm sustained chord.",
+    "event": "win"
+  },
+  {
+    "name": "level-clear-chime",
+    "seconds": 2,
+    "prompt": "A cascade of happy xylophone notes tumbling upward, like a puzzle game level-clear jingle, light and playful.",
+    "event": "win"
+  },
+  {
+    "name": "round-over-fall",
+    "seconds": 2,
+    "prompt": "A slow descending slide whistle drooping downward, a gentle comedic 'game over' fall, ending soft and low.",
+    "event": "lose"
+  },
+  {
+    "name": "ui-click",
+    "seconds": 1,
+    "prompt": "A very short crisp UI click, like a plastic mouse button press, tight and dry with no reverb.",
+    "event": "click"
+  },
+  {
+    "name": "ui-confirm-tap",
+    "seconds": 1,
+    "prompt": "A soft rounded pop, like a finger tapping a touchscreen button, warm and slightly woody.",
+    "event": "click"
+  },
+  {
+    "name": "pause-duck",
+    "seconds": 1,
+    "prompt": "A single mellow muted-pluck note that dips in volume, like music being gently ducked when a game pauses.",
+    "event": "pause"
+  }
+]

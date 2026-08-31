@@ -1,0 +1,17 @@
+{
+  "name": "parkwise",
+  "version": "1.0.0",
+  "description": "Parkwise — rooftop sliding-block parking puzzle (browser + authoritative Node server).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": ["puzzle", "sliding-block", "three.js"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "esbuild": "^0.28.2",
+    "three": "^0.185.1"
+  }
+}

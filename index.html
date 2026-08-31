@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Parkwise</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg:#0b1220; --panel:#141d2e; --panel2:#1b2740; --ink:#eef3f8; --dim:#9fb2c8;
+  --accent:#e86a3c; --accent2:#2f9e6e; --danger:#e53935; --focus:#ffd54f;
+  --sat: env(safe-area-inset-top, 0px); --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px); --sar: env(safe-area-inset-right, 0px);
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+html, body { height:100%; }
+body { background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-size:16px; line-height:1.45; overflow:hidden; }
+body.large-text { font-size:20px; }
+button { font:inherit; color:inherit; }
+:focus-visible { outline:3px solid var(--focus); outline-offset:2px; border-radius:6px; }
+
+#app { height:100%; display:flex; flex-direction:column; }
+.screen { position:absolute; inset:0; display:none; flex-direction:column; overflow-y:auto;
+  padding: calc(12px + var(--sat)) calc(14px + var(--sar)) calc(14px + var(--sab)) calc(14px + var(--sal)); }
+.screen.active { display:flex; }
+
+h1.brand { font-size:clamp(30px,6vw,52px); font-weight:800; letter-spacing:.06em; text-align:center; }
+.tagline { color:var(--dim); text-align:center; max-width:70ch; margin:6px auto 0; }
+.center-col { display:flex; flex-direction:column; align-items:center; gap:14px; margin:auto; width:min(94vw,640px); }
+
+.btn { cursor:pointer; border:none; border-radius:12px; padding:12px 24px; font-weight:700;
+  min-height:44px; min-width:44px; background:var(--panel2); color:var(--ink);
+  box-shadow:0 4px 14px rgba(0,0,0,.35), inset 0 -2px 0 rgba(0,0,0,.2); transition:transform .08s, filter .12s; }
+.btn:hover { filter:brightness(1.12); }
+.btn:active { transform:translateY(2px); }
+.btn.primary { background:var(--accent); color:#fff; font-size:1.15em; padding:14px 34px; }
+.btn.good { background:var(--accent2); }
+.btn.ghost { background:transparent; box-shadow:inset 0 0 0 2px var(--dim); }
+.btn[disabled] { opacity:.45; cursor:not-allowed; }
+.btn-row { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; }
+
+.menu-list { display:flex; flex-direction:column; gap:10px; width:100%; }
+.menu-item { display:flex; justify-content:space-between; align-items:center; gap:12px; text-align:left;
+  background:var(--panel); border-radius:12px; padding:14px 18px; cursor:pointer; border:2px solid transparent; }
+.menu-item:hover, .menu-item:focus-visible { border-color:var(--accent); }
+.menu-item .meta { color:var(--dim); font-size:.85em; }
+.menu-item .title { font-weight:700; }
+.menu-item .desc { color:var(--dim); font-size:.85em; margin-top:2px; }
+
+/* ---- game screen layout ---- */
+#screen-game { padding:0; overflow:hidden; }
+#game-shell { position:relative; flex:1; display:grid; min-height:0;
+  grid-template-columns: minmax(0,220px) 1fr minmax(0,220px);
+  grid-template-rows: auto 1fr auto; grid-template-areas: "status status status" "left field right" "tray tray tray"; }
+#status-bar { grid-area:status; display:flex; gap:14px; align-items:center; justify-content:center; flex-wrap:wrap;
+  padding: calc(8px + var(--sat)) 12px 8px; background:rgba(10,16,28,.85); z-index:5; font-weight:600; }
+#status-bar .chip { background:var(--panel2); border-radius:8px; padding:4px 12px; }
+#rail-left { grid-area:left; padding:10px; overflow-y:auto; }
+#rail-right { grid-area:right; padding:10px; overflow-y:auto; }
+#field { grid-area:field; position:relative; min-height:0; display:flex; align-items:center; justify-content:center; }
+#canvas-wrap { position:relative; width:100%; height:100%; }
+#game-canvas { display:block; width:100%; height:100%; touch-action:none; }
+#tray { grid-area:tray; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;
+  padding:10px 12px calc(10px + var(--sab)); background:rgba(10,16,28,.85); z-index:5; }
+.rail-card { background:var(--panel); border-radius:12px; padding:12px 14px; margin-bottom:10px; }
+.rail-card h3 { font-size:.95em; margin-bottom:6px; }
+.rail-card p, .rail-card li { color:var(--dim); font-size:.85em; }
+.drawer-toggle { display:none; }
+
+/* compact: rails collapse into drawers */
+@media (max-width:1023px) {
+  #game-shell { grid-template-columns:1fr; grid-template-areas:"status" "field" "tray"; }
+  #rail-left, #rail-right { position:fixed; top:0; bottom:0; width:min(84vw,320px); background:var(--panel);
+    z-index:40; transition:transform .2s ease; padding-top:calc(10px + var(--sat)); }
+  #rail-left { left:0; transform:translateX(-105%); }
+  #rail-right { right:0; transform:translateX(105%); }
+  #rail-left.open, #rail-right.open { transform:none; box-shadow:0 0 40px rgba(0,0,0,.6); }
+  .drawer-toggle { display:inline-block; }
+}
+/* portrait mobile: square-ish playfield, thumb tray */
+@media (max-width:700px) and (orientation:portrait) {
+  #status-bar { gap:8px; font-size:.85em; }
+  #tray .btn { flex:1 1 30%; padding:12px 8px; }
+}
+/* landscape mobile: narrow status rail */
+@media (max-height:500px) and (orientation:landscape) {
+  #status-bar { font-size:.8em; padding-top:calc(4px + var(--sat)); }
+  #tray { padding-top:6px; padding-bottom:calc(6px + var(--sab)); }
+  #tray .btn { padding:8px 14px; min-height:44px; }
+}
+
+/* ---- overlays ---- */
+.overlay { position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+  background:rgba(4,8,16,.7); z-index:60; padding:16px; }
+.overlay.active { display:flex; }
+.dialog { background:var(--panel); border-radius:16px; padding:22px; width:min(94vw,560px);
+  max-height:calc(100vh - 32px); overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,.6); }
+.dialog h2 { margin-bottom:10px; }
+.dialog section { margin-bottom:16px; }
+.dialog label { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:6px 0; }
+.dialog input[type=range] { flex:1; max-width:220px; }
+.score-table { width:100%; border-collapse:collapse; margin:8px 0; }
+.score-table td { padding:5px 8px; border-bottom:1px solid rgba(255,255,255,.08); }
+.score-table td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
+.score-table tr.total td { font-weight:800; border-bottom:none; font-size:1.1em; }
+
+#sr-announcer { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+#caption-line { position:absolute; left:50%; bottom:calc(70px + var(--sab)); transform:translateX(-50%);
+  background:rgba(0,0,0,.75); padding:4px 14px; border-radius:8px; font-size:.9em; opacity:0; transition:opacity .3s;
+  pointer-events:none; z-index:8; }
+#caption-line.show { opacity:1; }
+
+body.high-contrast { --bg:#000; --panel:#101418; --panel2:#1d2530; --ink:#fff; --dim:#d7dee8; --accent:#ff7b00; --focus:#00e5ff; }
+body.reduced-motion * { transition:none !important; animation:none !important; }
+.vehicle-list { list-style:none; }
+.vehicle-list button { display:block; width:100%; text-align:left; margin:4px 0; padding:8px 10px;
+  background:var(--panel2); border:none; border-radius:8px; cursor:pointer; }
+.vehicle-list button[aria-pressed=true] { box-shadow:inset 0 0 0 2px var(--accent); }
+#compat-message { display:none; padding:20px; text-align:center; color:var(--danger); font-weight:700; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Title / home -->
+  <section id="screen-title" class="screen" aria-labelledby="title-h">
+    <div class="center-col">
+      <h1 class="brand" id="title-h">Parkwise</h1>
+      <p class="tagline">A rooftop parking puzzle. Slide vehicles along the way they face and open a path so the red car can reach the exit gate.</p>
+      <button class="btn primary" id="btn-play">Play</button>
+      <div class="btn-row">
+        <button class="btn" id="btn-daily">Daily challenge</button>
+        <button class="btn" id="btn-journey-resume">Journey</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn ghost" id="btn-settings">Settings</button>
+        <button class="btn ghost" id="btn-help">How to play</button>
+      </div>
+      <p class="tagline" id="profile-line">Guest profile — progress is saved on this device.</p>
+    </div>
+  </section>
+
+  <!-- Mode select -->
+  <section id="screen-modes" class="screen" aria-labelledby="modes-h">
+    <div class="center-col">
+      <h2 id="modes-h">Choose a mode</h2>
+      <div class="menu-list" id="mode-list" role="list"></div>
+      <button class="btn ghost" id="btn-modes-back">Back</button>
+    </div>
+  </section>
+
+  <!-- Mode setup / stage pick -->
+  <section id="screen-setup" class="screen" aria-labelledby="setup-h">
+    <div class="center-col">
+      <h2 id="setup-h">Set up</h2>
+      <p class="tagline" id="setup-info"></p>
+      <div class="menu-list" id="setup-list" role="list"></div>
+      <button class="btn ghost" id="btn-setup-back">Back</button>
+    </div>
+  </section>
+
+  <!-- Play -->
+  <section id="screen-game" class="screen" aria-labelledby="objective-text">
+    <div id="game-shell">
+      <div id="status-bar" role="status">
+        <button class="btn ghost drawer-toggle" id="btn-rail-left" aria-label="Open objective panel">&#9776;</button>
+        <span class="chip" id="chip-mode">Mode</span>
+        <span class="chip" id="chip-moves">Moves 0</span>
+        <span class="chip" id="chip-time">0:00</span>
+        <span class="chip" id="chip-limit" hidden></span>
+        <button class="btn ghost" id="btn-pause" aria-label="Pause game">II Pause</button>
+        <button class="btn ghost drawer-toggle" id="btn-rail-right" aria-label="Open actions panel">&#9881;</button>
+      </div>
+      <aside id="rail-left" aria-label="Objective and progress">
+        <div class="rail-card">
+          <h3 id="objective-text">Objective</h3>
+          <p id="objective-desc">Guide the red car to the exit gate on the right edge.</p>
+        </div>
+        <div class="rail-card">
+          <h3>Progress</h3>
+          <p id="progress-desc"></p>
+        </div>
+        <div class="rail-card">
+          <h3>Vehicles (screen-reader board model)</h3>
+          <ul class="vehicle-list" id="vehicle-list"></ul>
+        </div>
+      </aside>
+      <main id="field">
+        <div id="canvas-wrap">
+          <canvas id="game-canvas" aria-label="3D parking lot board. Use the vehicle list or arrow keys to play."></canvas>
+          <div id="caption-line" aria-hidden="true"></div>
+        </div>
+      </main>
+      <aside id="rail-right" aria-label="Actions and status">
+        <div class="rail-card">
+          <h3>Actions</h3>
+          <div class="btn-row" style="flex-direction:column; align-items:stretch;">
+            <button class="btn" id="btn-undo">Undo (U)</button>
+            <button class="btn" id="btn-hint">Hint (H)</button>
+            <button class="btn" id="btn-restart">Restart (R)</button>
+            <button class="btn ghost" id="btn-camera">Reset camera (C)</button>
+          </div>
+        </div>
+        <div class="rail-card">
+          <h3>Session</h3>
+          <p id="session-desc"></p>
+        </div>
+      </aside>
+      <div id="tray">
+        <button class="btn" id="tray-undo">Undo</button>
+        <button class="btn" id="tray-hint">Hint</button>
+        <button class="btn ghost" id="tray-restart">Restart</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pause overlay -->
+  <div class="overlay" id="overlay-pause" role="dialog" aria-modal="true" aria-labelledby="pause-h">
+    <div class="dialog">
+      <h2 id="pause-h">Paused</h2>
+      <div class="btn-row" style="flex-direction:column; align-items:stretch;">
+        <button class="btn primary" id="btn-resume">Resume</button>
+        <button class="btn" id="btn-pause-settings">Settings</button>
+        <button class="btn" id="btn-pause-help">Help</button>
+        <button class="btn ghost" id="btn-leave">Leave round</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Results overlay -->
+  <div class="overlay" id="overlay-results" role="dialog" aria-modal="true" aria-labelledby="results-h">
+    <div class="dialog">
+      <h2 id="results-h">Results</h2>
+      <p id="results-headline" style="font-size:1.1em; font-weight:700;"></p>
+      <table class="score-table" id="score-breakdown" aria-label="Score breakdown"></table>
+      <p id="results-progress" class="tagline" style="text-align:left;"></p>
+      <section id="results-compare">
+        <h3>Leaderboard</h3>
+        <table class="score-table" id="leaderboard-table"></table>
+        <div class="btn-row" id="submit-row">
+          <input id="submit-name" maxlength="24" placeholder="Display name" aria-label="Display name" style="flex:1; min-height:44px; border-radius:8px; border:none; padding:0 12px;">
+          <button class="btn good" id="btn-submit-score">Submit score</button>
+        </div>
+        <p class="tagline" style="text-align:left;" id="submit-status"></p>
+      </section>
+      <div class="btn-row">
+        <button class="btn primary" id="btn-next">Next</button>
+        <button class="btn" id="btn-retry">Retry</button>
+        <button class="btn ghost" id="btn-results-exit">Exit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings overlay -->
+  <div class="overlay" id="overlay-settings" role="dialog" aria-modal="true" aria-labelledby="settings-h">
+    <div class="dialog">
+      <h2 id="settings-h">Settings</h2>
+      <section aria-label="Audio">
+        <h3>Audio</h3>
+        <label>Music <input type="range" id="vol-music" min="0" max="100" value="60"></label>
+        <label>Effects <input type="range" id="vol-effects" min="0" max="100" value="80"></label>
+        <label>Ambience <input type="range" id="vol-ambience" min="0" max="100" value="40"></label>
+        <label>Voice cues <input type="range" id="vol-voice" min="0" max="100" value="70"></label>
+        <label>Mute all <input type="checkbox" id="opt-mute"></label>
+      </section>
+      <section aria-label="Graphics">
+        <h3>Graphics</h3>
+        <label>Quality tier
+          <select id="opt-quality" style="min-height:44px;">
+            <option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option>
+          </select>
+        </label>
+        <label>Theme <select id="opt-theme" style="min-height:44px;"></select></label>
+      </section>
+      <section aria-label="Accessibility">
+        <h3>Accessibility</h3>
+        <label>Reduced motion <input type="checkbox" id="opt-reduced-motion"></label>
+        <label>High contrast <input type="checkbox" id="opt-high-contrast"></label>
+        <label>Larger text <input type="checkbox" id="opt-large-text"></label>
+        <label>Text captions for sounds <input type="checkbox" id="opt-captions" checked></label>
+        <label>Hold-to-drag (vs tap-tap) <input type="checkbox" id="opt-hold-drag" checked></label>
+        <label>Left-handed tray <input type="checkbox" id="opt-lefty"></label>
+        <button class="btn ghost" id="btn-replay-tutorial">Replay tutorial</button>
+      </section>
+      <div class="btn-row"><button class="btn primary" id="btn-settings-close">Done</button></div>
+    </div>
+  </div>
+
+  <!-- Help overlay -->
+  <div class="overlay" id="overlay-help" role="dialog" aria-modal="true" aria-labelledby="help-h">
+    <div class="dialog">
+      <h2 id="help-h">How to play</h2>
+      <section>
+        <h3>Goal</h3>
+        <p>Slide vehicles along the direction they face until the red car can drive straight out through the glowing exit gate on the right edge of the lot.</p>
+      </section>
+      <section>
+        <h3>Controls</h3>
+        <ul style="padding-left:20px; color:var(--dim);">
+          <li>Pointer/touch: tap a vehicle to select, then drag along its axis, or tap a glowing target marker.</li>
+          <li>Keyboard: Tab or arrow keys choose a vehicle, arrow keys slide it, Enter confirms.</li>
+          <li>U undo, H hint, R restart, C reset camera, Esc pause.</li>
+          <li>Gamepad: D-pad/left stick navigate, A confirm, B cancel, Start pause.</li>
+        </ul>
+      </section>
+      <section>
+        <h3>Scoring</h3>
+        <p>Score combines a completion base, a bonus for beating the move par, a time bonus, and penalties for hints and blocked attempts. Fewer moves and faster solves score higher.</p>
+      </section>
+      <div class="btn-row"><button class="btn primary" id="btn-help-close">Close</button></div>
+    </div>
+  </div>
+
+  <div id="sr-announcer" aria-live="polite"></div>
+  <div id="compat-message" role="alert"></div>
+</div>
+
+<script type="module">
+  import * as THREE from '/three.module.min.js';
+  window.THREE = THREE;
+</script>
+<script type="module" src="/rules.js"></script>
+<script type="module" src="/content.js"></script>
+<script type="module" src="/audio.js"></script>
+<script type="module" src="/main.js"></script>
+</body>
+</html>
