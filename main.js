@@ -225,7 +225,11 @@
             progress.winStreak = 0;
             saveProgress();
         }
-        setTimeout(() => showResults(won, sc, loseReason), settings.reducedMotion ? 200 : 900);
+        const finishedSession = session;
+        setTimeout(() => {
+            if (session === finishedSession && appState === 'resolving') showResults(won, sc, loseReason);
+        }, settings.reducedMotion ? 200 : 900);
+        return true;
     }
 
     // ================= renderer (Three.js rooftop diorama) =================
@@ -238,7 +242,14 @@
         } catch (e) {
             $('compat-message').style.display = 'block';
             $('compat-message').textContent = 'WebGL is unavailable. Parkwise needs 3D graphics; your progress is safe on this device.';
-            return { buildBoard() {}, syncVehicles() {}, flashInvalid() {}, highlightHint() {}, select() {}, applyQuality() {}, applyTheme() {}, resetCamera() {}, resize() {}, frame() {}, pickCell() { return null; }, pickVehicle() { return -1; }, dispose() {} };
+            // headless stub with the same surface as the renderer below
+            return {
+                buildBoard() {}, syncVehicles() {}, flashInvalid() {}, select() {},
+                highlightHint(move) { if (session) session.selected = move.v; },
+                applyQuality() {}, applyTheme() {}, resetCamera() {}, resize() {}, frame() {},
+                celebrate() {}, pickCell() { return null; }, pickVehicle() { return -1; }, screenPos() { return null; },
+                pickMarker() { return null; }, dispose() {},
+            };
         }
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -247,7 +258,21 @@
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 200);
         const CAM_HOME = { pos: new THREE.Vector3(0, 11.5, 10.5), look: new THREE.Vector3(0, 0, 0.4) };
-        function resetCamera() { camera.position.copy(CAM_HOME.pos); camera.lookAt(CAM_HOME.look); }
+        // Pull back along the home direction until the whole lot fits the current
+        // aspect — narrow portrait screens otherwise cut off the outer columns.
+        function fitCamera() {
+            const dir = CAM_HOME.pos.clone().sub(CAM_HOME.look);
+            const home = dir.length();
+            dir.normalize();
+            const tanV = Math.tan((camera.fov * Math.PI / 180) / 2);
+            const tanH = tanV * Math.max(0.05, camera.aspect);
+            const halfW = (R.GRID * CELL) / 2 + 1.4;                 // lot width + parapet
+            const halfV = ((R.GRID * CELL) / 2) * (CAM_HOME.pos.y / home) + 1.0; // depth foreshortened by the tilt
+            const need = Math.max(halfW / tanH, halfV / tanV);
+            camera.position.copy(CAM_HOME.look).addScaledVector(dir, Math.max(home, need));
+            camera.lookAt(CAM_HOME.look);
+        }
+        function resetCamera() { fitCamera(); }
         resetCamera();
 
         const hemi = new THREE.HemisphereLight(0xffffff, 0x333344, 0.85);
@@ -322,6 +347,8 @@
 
         function buildBoard(entry) {
             disposeGroup(boardGroup);
+            for (const p of vfx) { p.m.geometry.dispose(); p.m.material.dispose(); }
+            vfx = [];
             vehicleViews = [];
             markerMeshes = [];
             boardGroup = new THREE.Group();
@@ -400,7 +427,7 @@
 
             // vehicle views
             session.state.vehicles.forEach((v, i) => {
-                const color = v.target ? theme.target : theme.palette[(i - 1) % theme.palette.length];
+                const color = v.target ? theme.target : theme.palette[(i + theme.palette.length - 1) % theme.palette.length];
                 const mesh = makeVehicleMesh(v, v.target, color);
                 mesh.userData.vehicleIndex = i;
                 boardGroup.add(mesh);
@@ -422,6 +449,7 @@
                 const view = vehicleViews[i];
                 if (!view) return;
                 const p = vehicleCenter(v);
+                view.shake = 0;
                 if (animate && !settings.reducedMotion) {
                     view.anim = { from: view.mesh.position.clone(), to: new THREE.Vector3(p.x, 0, p.z), t: 0 };
                 } else {
@@ -478,6 +506,7 @@
         function flashInvalid(vIdx) {
             const view = vehicleViews[vIdx];
             if (!view || settings.reducedMotion) return;
+            if (!view.shake) view.shakeBaseX = view.mesh.position.x;
             view.shake = 0.25;
         }
 
@@ -503,30 +532,37 @@
         // raycast picking against explicit interaction layers only
         const raycaster = new THREE.Raycaster();
         const ndc = new THREE.Vector2();
-        function castAt(clientX, clientY, layer) {
+        const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+        const groundHit = new THREE.Vector3();
+        function aimAt(clientX, clientY, layer) {
             const r = canvas.getBoundingClientRect();
             ndc.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
             raycaster.setFromCamera(ndc, camera);
             raycaster.layers.set(layer);
-            const hits = raycaster.intersectObjects(boardGroup ? boardGroup.children : [], true);
-            return hits[0] || null;
+        }
+        function castAt(clientX, clientY, layer) {
+            aimAt(clientX, clientY, layer);
+            return raycaster.intersectObjects(boardGroup ? boardGroup.children : [], true);
         }
         function pickVehicle(x, y) {
-            const h = castAt(x, y, LAYER_GAME);
+            const h = castAt(x, y, LAYER_GAME)[0];
             if (!h) return -1;
             let o = h.object;
             while (o && o.userData.vehicleIndex === undefined) o = o.parent;
             return o ? o.userData.vehicleIndex : -1;
         }
         function pickMarker(x, y) {
-            const h = castAt(x, y, LAYER_MARK);
-            return h && h.object.userData.move ? h.object.userData.move : null;
+            // the selection ring shares the marker layer: take the first real marker
+            const h = castAt(x, y, LAYER_MARK).find(i => i.object.userData.move);
+            return h ? h.object.userData.move : null;
         }
         function pickCell(x, y) { // for drag axis projection
-            const h = castAt(x, y, LAYER_GAME);
-            if (!h) return null;
-            const wx = h.point.x / CELL + (R.GRID - 1) / 2;
-            const wy = h.point.z / CELL + (R.GRID - 1) / 2;
+            // the lot surface is environment geometry (layer 0), so project onto the
+            // board plane itself — this must also resolve over empty cells.
+            aimAt(x, y, LAYER_GAME);
+            if (!raycaster.ray.intersectPlane(groundPlane, groundHit)) return null;
+            const wx = groundHit.x / CELL + (R.GRID - 1) / 2;
+            const wy = groundHit.z / CELL + (R.GRID - 1) / 2;
             return { x: wx, y: wy };
         }
 
@@ -547,6 +583,7 @@
                 renderer.setSize(w, h, false);
                 camera.aspect = w / h;
                 camera.updateProjectionMatrix();
+                fitCamera();
             }
         }
 
@@ -565,8 +602,9 @@
                 }
                 if (view.shake) {
                     view.shake -= dt;
-                    view.mesh.position.x += Math.sin(now * 0.09) * 0.03 * Math.max(0, view.shake);
-                    if (view.shake <= 0) view.shake = 0;
+                    // offset from the stored base so the jiggle never drifts the car
+                    if (view.shake > 0 && !view.anim) view.mesh.position.x = view.shakeBaseX + Math.sin(now * 0.09) * 0.03 * view.shake;
+                    if (view.shake <= 0) { view.shake = 0; if (!view.anim) view.mesh.position.x = view.shakeBaseX; }
                 }
             }
             for (let i = vfx.length - 1; i >= 0; i--) {
@@ -575,7 +613,7 @@
                 p.m.position.addScaledVector(p.m.userData.vel, dt);
                 p.m.userData.vel.y -= 9.8 * dt;
                 p.m.rotation.x += dt * 5; p.m.rotation.y += dt * 7;
-                if (p.life <= 0) { boardGroup.remove(p.m); vfx.splice(i, 1); }
+                if (p.life <= 0) { boardGroup.remove(p.m); p.m.material.dispose(); vfx.splice(i, 1); }
             }
             if (exitGate) exitGate.material.emissiveIntensity = 0.55 + Math.sin(now * 0.004) * 0.2;
             renderer.render(scene, camera);
@@ -583,7 +621,15 @@
 
         function celebrate() { spawnConfetti(); }
 
-        return { buildBoard, syncVehicles, flashInvalid, highlightHint, applyQuality, applyTheme, resetCamera, resize, frame, pickVehicle, pickMarker, pickCell, celebrate };
+        // Board cell -> client coordinates (used by pointer-input smoke tests).
+        function screenPos(cellX, cellY) {
+            const p = cellToWorld(cellX, cellY);
+            const v = new THREE.Vector3(p.x, 0, p.z).project(camera);
+            const r = canvas.getBoundingClientRect();
+            return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
+        }
+
+        return { buildBoard, syncVehicles, flashInvalid, highlightHint, applyQuality, applyTheme, resetCamera, resize, frame, pickVehicle, pickMarker, pickCell, celebrate, screenPos, select: updateSelectionVisual };
     })();
 
     // ================= UI =================
@@ -622,15 +668,22 @@
         refreshVehicleList() {
             if (!session) return;
             const ul = $('vehicle-list');
-            ul.innerHTML = '';
+            // rebuild only when the roster changes: relabelling in place keeps
+            // keyboard focus on the button the player is currently using
+            if (ul.children.length !== session.state.vehicles.length) {
+                ul.innerHTML = '';
+                session.state.vehicles.forEach((v, i) => {
+                    const li = document.createElement('li');
+                    const b = document.createElement('button');
+                    b.addEventListener('click', () => selectVehicle(i));
+                    li.appendChild(b);
+                    ul.appendChild(li);
+                });
+            }
             session.state.vehicles.forEach((v, i) => {
-                const li = document.createElement('li');
-                const b = document.createElement('button');
+                const b = ul.children[i].firstChild;
                 b.textContent = vehicleName(v) + ' at column ' + (v.x + 1) + ', row ' + (v.y + 1) + (v.target ? ' (target)' : '');
                 b.setAttribute('aria-pressed', i === session.selected ? 'true' : 'false');
-                b.addEventListener('click', () => selectVehicle(i));
-                li.appendChild(b);
-                ul.appendChild(li);
             });
         },
     };
@@ -646,7 +699,7 @@
         if (!session || session.over) return;
         session.selected = i;
         A.playSfx('select');
-        render.syncVehicles(false);
+        render.select(); // move the ring/markers without snapping in-flight slides
         ui.refreshVehicleList();
         announce(vehicleName(session.state.vehicles[i]) + ' selected.');
     }
@@ -817,11 +870,21 @@
     }
 
     function refreshLeaderboard() {
-        fetch('/api/v1/scores?board=global').then(r => r.json()).then(j => {
+        const query = new URLSearchParams({ board: 'global', mode: session.mode, seed: String(session.entry.seed), contentVersion: String(C.CONTENT_VERSION) });
+        if (session.mode === 'daily') query.set('day', session.entry.day);
+        fetch('/api/v1/scores?' + query).then(r => r.json()).then(j => {
             const t = $('leaderboard-table');
             if (!j.entries || !j.entries.length) { t.innerHTML = '<tr><td>No validated scores yet — be the first.</td></tr>'; return; }
-            t.innerHTML = '<tr><th>Name</th><th>Score</th><th>Moves</th><th>Time</th></tr>' + j.entries.slice(0, 10).map(e =>
-                '<tr><td>' + e.name + '</td><td>' + e.score + '</td><td>' + e.moves + '</td><td>' + formatTime(e.seconds) + '</td></tr>').join('');
+            t.innerHTML = '<tr><th>Name</th><th>Score</th><th>Moves</th><th>Time</th></tr>';
+            for (const e of j.entries.slice(0, 10)) {
+                const tr = document.createElement('tr');
+                for (const cell of [String(e.name), String(e.score), String(e.moves), formatTime(e.seconds | 0)]) {
+                    const td = document.createElement('td');
+                    td.textContent = cell; // names come from the network: never inject markup
+                    tr.appendChild(td);
+                }
+                t.appendChild(tr);
+            }
         }).catch(() => { $('leaderboard-table').innerHTML = '<tr><td>Leaderboard offline — playing locally.</td></tr>'; });
     }
 
@@ -857,7 +920,7 @@
         const vi = render.pickVehicle(e.clientX, e.clientY);
         if (vi >= 0) {
             selectVehicle(vi);
-            drag = { id: e.pointerId, v: vi, sx: e.clientX, sy: e.clientY, moved: false };
+            drag = { id: e.pointerId, v: vi, sx: e.clientX, sy: e.clientY, moved: false, from: render.pickCell(e.clientX, e.clientY) };
         }
     });
     canvas.addEventListener('pointermove', e => {
@@ -871,14 +934,19 @@
         if (!d.moved || !settings.holdDrag) return; // tap = select only
         const v = session.state.vehicles[d.v];
         const cell = render.pickCell(e.clientX, e.clientY);
-        if (!cell) return;
-        // project the drag onto the vehicle axis: toward the leading end or back from the tail
-        const lead = v.ori === 'h' ? cell.x - v.x : cell.y - v.y;
-        const headDelta = lead >= (v.len - 1) / 2
-            ? (v.ori === 'h' ? cell.x - (v.x + v.len - 1) : cell.y - (v.y + v.len - 1))
-            : lead;
-        const cells2 = Math.round(headDelta);
-        if (cells2 !== 0) executeMove(d.v, Math.sign(cells2), Math.abs(cells2), 'd' + e.pointerId + '-' + Date.now());
+        if (!cell || !d.from) return;
+        // travel is measured from where the vehicle was grabbed, so the grab point
+        // on the body (nose, middle or tail) never biases the distance
+        const cells2 = Math.round(v.ori === 'h' ? cell.x - d.from.x : cell.y - d.from.y);
+        if (cells2 === 0) return;
+        const dir = Math.sign(cells2);
+        // an over-drag parks against the nearest obstacle instead of failing outright
+        const reach = R.legalActions(session.state)
+            .filter(a => a.v === d.v && a.dir === dir)
+            .reduce((m, a) => Math.max(m, a.dist), 0);
+        // reach 0 falls through to executeMove so the blocked move is announced
+        const dist = Math.max(1, Math.min(Math.abs(cells2), reach));
+        executeMove(d.v, dir, dist, 'd' + e.pointerId + '-' + Date.now());
     });
     canvas.addEventListener('pointercancel', () => { drag = null; });
 
@@ -895,9 +963,13 @@
         if (appState !== 'active' || !session || session.over) return;
         const k = e.key;
         if (k === 'Tab') {
+            // Only the board itself traps Tab (to cycle vehicles); Shift+Tab and Tab
+            // from anywhere else keep the normal focus order so the HUD controls
+            // stay reachable by keyboard.
+            if (document.activeElement !== canvas || e.shiftKey) return;
             e.preventDefault();
             const n = session.state.vehicles.length;
-            selectVehicle((session.selected + (e.shiftKey ? n - 1 : 1)) % n);
+            selectVehicle((session.selected + 1) % n);
         } else if (k.startsWith('Arrow')) {
             e.preventDefault();
             const v = session.state.vehicles[session.selected];
@@ -941,6 +1013,7 @@
         openOverlay('overlay-pause');
     }
     function resumeGame() {
+        if (!session) return leaveRound();
         closeAllOverlays();
         setAppState('active', 'Resumed.');
         A.startMusic();
@@ -1004,6 +1077,9 @@
     on('btn-replay-tutorial', () => { closeOverlay('overlay-settings'); startLearn(0); });
     on('btn-rail-left', () => { $('rail-left').classList.toggle('open'); });
     on('btn-rail-right', () => { $('rail-right').classList.toggle('open'); });
+    // the open drawer covers the status bar, so it needs its own close control
+    on('btn-rail-left-close', () => { $('rail-left').classList.remove('open'); $('btn-rail-left').focus(); });
+    on('btn-rail-right-close', () => { $('rail-right').classList.remove('open'); $('btn-rail-right').focus(); });
 
     // settings controls
     for (const bus of ['music', 'effects', 'ambience', 'voice']) {
@@ -1057,8 +1133,6 @@
         setAppState('title');
         render.resize();
         rafId = requestAnimationFrame(frame);
-        // mark tutorials complete when their lessons are won
-        const origEnd = endRound;
         // host handshake: probe platform time once (graceful offline)
         fetch('/api/v1/time').then(r => r.json()).then(() => { $('profile-line').textContent = 'Guest profile — connected to host for daily sync and leaderboards.'; }).catch(() => {});
     }
@@ -1069,7 +1143,7 @@
         if (won && session && session.mode === 'learn' && !progress.tutorialsDone.includes(session.entry.id)) {
             progress.tutorialsDone.push(session.entry.id);
         }
-        _endRound(won, reason);
+        return _endRound(won, reason);
     };
 
     // public debug/verification API
@@ -1078,6 +1152,7 @@
         executeMove, undoMove, requestHint,
         startJourney, startLearn, startPractice, startChallenge, startDaily,
         rules: R, content: C,
+        screenPosOfCell: (x, y) => render.screenPos(x, y),
         get appState() { return appState; },
     };
 

@@ -17,7 +17,7 @@ const C = require('./content.js');
 
 const PORT = process.env.PORT ? +process.env.PORT : 8090;
 const ROOT = __dirname;
-const SCORES_FILE = path.join(ROOT, 'scores.json');
+const SCORES_FILE = process.env.PARKWISE_SCORES_FILE || path.join(ROOT, 'scores.json');
 const MAX_BODY = 64 * 1024;
 const MAX_COMMANDS = 2000;
 
@@ -101,17 +101,26 @@ function handleApi(req, res, url) {
         const db = loadScores();
         const entries = db.entries
             .filter(e => board === 'global' || e.board === board)
+            .filter(e => ['mode', 'seed', 'day', 'contentVersion'].every(key =>
+                !url.searchParams.has(key) || String(e[key]) === url.searchParams.get(key)))
             .sort((a, b) => b.score - a.score || a.seconds - b.seconds || (a.id < b.id ? -1 : 1))
             .slice(0, 50);
         return sendJson(res, 200, { board, entries });
     }
     if (url.pathname === '/api/v1/scores' && req.method === 'POST') {
         let body = '';
+        let aborted = false;
         req.on('data', chunk => {
+            if (aborted) return;
             body += chunk;
-            if (body.length > MAX_BODY) { req.destroy(); }
+            if (body.length > MAX_BODY) { // answer before hanging up, so the client shows a reason
+                aborted = true;
+                sendJson(res, 413, { error: 'submission too large' });
+                req.destroy();
+            }
         });
         req.on('end', () => {
+            if (aborted) return;
             let sub;
             try { sub = JSON.parse(body); } catch (e) { return sendJson(res, 400, { error: 'malformed json' }); }
             const verdict = validateSubmission(sub);
@@ -133,7 +142,7 @@ function handleApi(req, res, url) {
             saveScores(db);
             return sendJson(res, 201, { ok: true, id: record.id, score: record.score });
         });
-        req.on('error', () => sendJson(res, 400, { error: 'request failed' }));
+        req.on('error', () => { if (!aborted && !res.headersSent) sendJson(res, 400, { error: 'request failed' }); });
         return;
     }
     return sendJson(res, 404, { error: 'not found' });
@@ -145,9 +154,14 @@ const server = http.createServer((req, res) => {
     if (url.pathname.startsWith('/api/')) return handleApi(req, res, url);
 
     // static files; stay inside ROOT
-    let rel = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
+    let rel;
+    try { // a malformed percent-escape must not take the server down
+        rel = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
+    } catch (e) { res.writeHead(400); return res.end('bad request'); }
     const p = path.normalize(path.join(ROOT, rel));
-    if (!p.startsWith(ROOT) || p.includes('scores.json')) { res.writeHead(403); return res.end('forbidden'); }
+    // ROOT itself, or a path below it — plain startsWith would also accept a
+    // sibling directory whose name merely begins with ROOT.
+    if ((p !== ROOT && !p.startsWith(ROOT + path.sep)) || p.includes('scores.json')) { res.writeHead(403); return res.end('forbidden'); }
     fs.stat(p, (err, st) => {
         if (err || !st.isFile()) { res.writeHead(404); return res.end('not found'); }
         res.writeHead(200, { 'content-type': MIME[path.extname(p).toLowerCase()] || 'application/octet-stream' });
@@ -155,4 +169,4 @@ const server = http.createServer((req, res) => {
     });
 });
 
-server.listen(PORT, () => console.log('parkwise server on http://localhost:' + PORT));
+server.listen(PORT, () => console.log('parkwise server on http://localhost:' + server.address().port));

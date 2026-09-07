@@ -68,6 +68,7 @@ h1.brand { font-size:clamp(30px,6vw,52px); font-weight:800; letter-spacing:.06em
 .rail-card h3 { font-size:.95em; margin-bottom:6px; }
 .rail-card p, .rail-card li { color:var(--dim); font-size:.85em; }
 .drawer-toggle { display:none; }
+#rail-left > .drawer-toggle, #rail-right > .drawer-toggle { width:100%; margin-bottom:10px; }
 
 /* compact: rails collapse into drawers */
 @media (max-width:1023px) {
@@ -164,7 +165,7 @@ body.reduced-motion * { transition:none !important; animation:none !important; }
   <!-- Play -->
   <section id="screen-game" class="screen" aria-labelledby="objective-text">
     <div id="game-shell">
-      <div id="status-bar" role="status">
+      <div id="status-bar">
         <button class="btn ghost drawer-toggle" id="btn-rail-left" aria-label="Open objective panel">&#9776;</button>
         <span class="chip" id="chip-mode">Mode</span>
         <span class="chip" id="chip-moves">Moves 0</span>
@@ -174,6 +175,7 @@ body.reduced-motion * { transition:none !important; animation:none !important; }
         <button class="btn ghost drawer-toggle" id="btn-rail-right" aria-label="Open actions panel">&#9881;</button>
       </div>
       <aside id="rail-left" aria-label="Objective and progress">
+        <button class="btn ghost drawer-toggle" id="btn-rail-left-close">Close panel</button>
         <div class="rail-card">
           <h3 id="objective-text">Objective</h3>
           <p id="objective-desc">Guide the red car to the exit gate on the right edge.</p>
@@ -189,11 +191,13 @@ body.reduced-motion * { transition:none !important; animation:none !important; }
       </aside>
       <main id="field">
         <div id="canvas-wrap">
-          <canvas id="game-canvas" aria-label="3D parking lot board. Use the vehicle list or arrow keys to play."></canvas>
+          <canvas id="game-canvas" tabindex="0" role="application"
+                  aria-label="Parking lot board. Tab cycles vehicles, arrow keys slide the selected vehicle, Shift+Tab leaves the board."></canvas>
           <div id="caption-line" aria-hidden="true"></div>
         </div>
       </main>
       <aside id="rail-right" aria-label="Actions and status">
+        <button class="btn ghost drawer-toggle" id="btn-rail-right-close">Close panel</button>
         <div class="rail-card">
           <h3>Actions</h3>
           <div class="btn-row" style="flex-direction:column; align-items:stretch;">
@@ -300,7 +304,7 @@ body.reduced-motion * { transition:none !important; animation:none !important; }
         <h3>Controls</h3>
         <ul style="padding-left:20px; color:var(--dim);">
           <li>Pointer/touch: tap a vehicle to select, then drag along its axis, or tap a glowing target marker.</li>
-          <li>Keyboard: Tab or arrow keys choose a vehicle, arrow keys slide it, Enter confirms.</li>
+          <li>Keyboard: Tab into the board, then Tab cycles vehicles and arrow keys slide the selected one. Shift+Tab leaves the board for the buttons.</li>
           <li>U undo, H hint, R restart, C reset camera, Esc pause.</li>
           <li>Gamepad: D-pad/left stick navigate, A confirm, B cancel, Start pause.</li>
         </ul>
