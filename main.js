@@ -42,7 +42,9 @@
     const progress = Object.assign({
         journeyUnlocked: 0, stars: {}, wins: 0, winStreak: 0,
         tutorialsDone: [], achievements: {}, dailiesDone: {}, lastDaily: null,
+        bestScores: {},
     }, loadJson(PROGRESS_KEY, {}));
+    progress.bestScores = progress.bestScores || {};
 
     const ACHIEVEMENTS = {
         first_completion: 'First clear — solve your first lot',
@@ -58,8 +60,64 @@
         A.playSfx('win');
         saveProgress();
     }
-    function saveSettings() { saveJson(SETTINGS_KEY, settings); }
-    function saveProgress() { saveJson(PROGRESS_KEY, progress); }
+    function saveSettings() { saveJson(SETTINGS_KEY, settings); platformCloudDirty(); }
+    function saveProgress() { saveJson(PROGRESS_KEY, progress); platformCloudDirty(); }
+
+    // ================= StarHermit platform (hosted mode) =================
+    // window.PARKWISE_PLATFORM reads the launch token at load; hosted is true
+    // only when a token was actually read. Local/offline play never calls the API.
+    const PF = window.PARKWISE_PLATFORM;
+    const platform = { hosted: !!(PF && PF.hosted), nickname: null, sync: 'local' };
+
+    function platformCloudDirty() { if (PF) PF.cloudDirty(); }
+
+    function boardKey(mode, entry) { return mode + ':' + (entry.day || entry.seed); }
+
+    function renderProfileLine() {
+        const el = $('profile-line');
+        if (!platform.hosted) {
+            el.textContent = 'Local profile — progress is saved on this device.';
+            return;
+        }
+        const syncText = {
+            saving: 'saving to your account…',
+            synced: 'progress synced to your account',
+            offline: 'offline — changes stay on this device',
+        }[platform.sync] || 'progress follows this account';
+        el.textContent = (platform.nickname || 'Player') + ' — ' + syncText;
+    }
+
+    // Remote snapshot wins conflicts; localStorage stays the offline cache.
+    function applyRemoteDoc(doc) {
+        if (!doc || typeof doc !== 'object') return false;
+        if (doc.settings && typeof doc.settings === 'object') {
+            Object.assign(settings, defaults, doc.settings);
+            settings.volumes = Object.assign({}, defaults.volumes, settings.volumes);
+        }
+        if (doc.progress && typeof doc.progress === 'object') {
+            Object.assign(progress, doc.progress);
+            progress.bestScores = progress.bestScores || {};
+        }
+        saveJson(SETTINGS_KEY, settings); // refresh the cache without re-uploading
+        saveJson(PROGRESS_KEY, progress);
+        applySettingsToDom();
+        themeSel.value = settings.theme || C.THEMES[0].id;
+        return true;
+    }
+
+    async function initPlatform() {
+        if (!platform.hosted) return;
+        platform.nickname = PF.fallbackName(PF.sub);
+        PF.onStatus(s => { platform.sync = s; renderProfileLine(); });
+        PF.cloudStart(() => ({ savedAt: Date.now(), settings, progress }));
+        try {
+            const remote = await PF.cloudLoad();
+            if (remote) applyRemoteDoc(remote); // remote-preferred load
+            else PF.cloudDirty(); // no remote save yet: mirror the local cache up once
+        } catch (e) { /* offline start: the local cache stays authoritative */ }
+        PF.myDisplayName().then(n => { platform.nickname = n; renderProfileLine(); });
+        renderProfileLine();
+    }
 
     // ================= app state machine =================
     // boot → title → mode-select → preparing → active ↔ paused → results
@@ -205,6 +263,8 @@
         session.finalScore = sc;
         if (won) {
             A.playSfx('win');
+            const bk = boardKey(session.mode, session.entry);
+            if (!progress.bestScores[bk] || sc.total > progress.bestScores[bk]) progress.bestScores[bk] = sc.total;
             progress.wins++;
             progress.winStreak++;
             if (session.hintsUsed === 0 && session.undosUsed === 0 && session.state.moves <= session.entry.par && session.invalidCount === 0) unlockAchievement('mechanic_mastery');
@@ -764,7 +824,7 @@
                     locked ? 'locked' : '★'.repeat(stars) || 'new', () => startJourney(i), locked);
             }
         } else if (mode === 'daily') {
-            addItem('Today’s lot (' + todayKey() + ')', 'seed synchronized with server time', () => startDaily());
+            addItem('Today’s lot (' + todayKey() + ')', 'one shared lot per UTC day', () => startDaily());
         } else if (mode === 'practice') {
             addItem('Easy', 'short solutions', () => startPractice(0));
             addItem('Medium', 'deeper planning', () => startPractice(1));
@@ -815,7 +875,9 @@
     }
     function startDaily() {
         const finish = day => beginRound('daily', C.dailyLevel(day), 'Daily challenge for ' + day + '.');
-        // synchronize to platform time with round-trip adjustment; fall back to local UTC
+        // hosted: the platform exposes no time route, so key the day from the local UTC clock
+        if (platform.hosted) return finish(todayKey());
+        // local dev: synchronize to the game server's clock with round-trip adjustment
         const t0 = Date.now();
         fetch('/api/v1/time').then(r => r.json()).then(j => {
             const rtt = Date.now() - t0;
@@ -861,6 +923,14 @@
             : 'Retry to keep your streak alive.';
         const ranked = ['journey', 'daily', 'score'].includes(session.mode) && won;
         $('submit-row').style.display = ranked ? '' : 'none';
+        if (ranked) {
+            // hosted play submits under the account nickname; the free-text name
+            // field only exists for the local dev server
+            $('submit-name').style.display = platform.hosted ? 'none' : '';
+            $('btn-submit-score').textContent = platform.hosted && platform.nickname
+                ? 'Submit as ' + platform.nickname
+                : 'Submit score';
+        }
         $('submit-status').textContent = '';
         $('leaderboard-table').innerHTML = '<tr><td>Loading…</td></tr>';
         refreshLeaderboard();
@@ -870,6 +940,7 @@
     }
 
     function refreshLeaderboard() {
+        if (platform.hosted) return refreshHostedLeaderboard();
         const query = new URLSearchParams({ board: 'global', mode: session.mode, seed: String(session.entry.seed), contentVersion: String(C.CONTENT_VERSION) });
         if (session.mode === 'daily') query.set('day', session.entry.day);
         fetch('/api/v1/scores?' + query).then(r => r.json()).then(j => {
@@ -885,12 +956,48 @@
                 }
                 t.appendChild(tr);
             }
-        }).catch(() => { $('leaderboard-table').innerHTML = '<tr><td>Leaderboard offline — playing locally.</td></tr>'; });
+        }).catch(() => { showLocalBoard(); });
+    }
+
+    // Hosted boards are platform-owned and read-only: game info → leaderboardId →
+    // entries with display names. Anything unavailable falls back to the personal best.
+    async function refreshHostedLeaderboard() {
+        const t = $('leaderboard-table');
+        try {
+            const info = await PF.gameInfo();
+            if (info && info.leaderboardId) {
+                const rows = await PF.leaderboardEntries(info.leaderboardId, { pageSize: 10 });
+                if (!rows.length) { t.innerHTML = '<tr><td>No entries yet — be the first.</td></tr>'; return; }
+                t.innerHTML = '<tr><th>Rank</th><th>Name</th><th>Score</th></tr>';
+                for (const e of rows) {
+                    const tr = document.createElement('tr');
+                    for (const cell of [String(e.rank), e.name, String(e.score)]) {
+                        const td = document.createElement('td');
+                        td.textContent = cell; // names come from the network: never inject markup
+                        tr.appendChild(td);
+                    }
+                    t.appendChild(tr);
+                }
+                return;
+            }
+        } catch (e) { /* platform unreachable: fall through to the local view */ }
+        showLocalBoard();
+    }
+
+    function showLocalBoard() {
+        const t = $('leaderboard-table');
+        const best = progress.bestScores[boardKey(session.mode, session.entry)];
+        t.innerHTML = '<tr><td>' + (best != null
+            ? 'Personal best: ' + best + ' — global board unavailable for this round.'
+            : 'Leaderboard offline — playing locally.') + '</td></tr>';
     }
 
     function submitScore() {
         if (!session || !session.won) return;
-        const name = $('submit-name').value.trim() || 'Guest';
+        // hosted play submits under the account nickname; local dev keeps the name field
+        const name = platform.hosted
+            ? (platform.nickname || PF.fallbackName(PF.sub))
+            : ($('submit-name').value.trim() || 'Guest');
         const body = {
             name, mode: session.mode === 'score' ? 'score' : session.mode,
             day: session.entry.day || todayKey(),
@@ -899,14 +1006,20 @@
             seconds: sessionElapsedSec(), hints: session.hintsUsed, invalid: session.invalidCount,
         };
         $('submit-status').textContent = 'Validating…';
-        fetch('/api/v1/scores', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+        const headers = { 'content-type': 'application/json' };
+        if (platform.hosted) headers.authorization = 'Bearer ' + PF.token; // its-backend: script server validates
+        fetch('/api/v1/scores', { method: 'POST', headers, body: JSON.stringify(body) })
             .then(async r => {
-                const j = await r.json();
+                const j = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(j.error || 'rejected');
                 $('submit-status').textContent = 'Score accepted (validated server-side).';
                 refreshLeaderboard();
             })
-            .catch(e => { $('submit-status').textContent = 'Submit failed: ' + e.message; });
+            .catch(e => {
+                $('submit-status').textContent = platform.hosted
+                    ? 'Validation server unavailable — score kept locally and in your account cloud save.'
+                    : 'Submit failed: ' + e.message;
+            });
     }
 
     // ================= input: pointer / touch =================
@@ -1133,8 +1246,7 @@
         setAppState('title');
         render.resize();
         rafId = requestAnimationFrame(frame);
-        // host handshake: probe platform time once (graceful offline)
-        fetch('/api/v1/time').then(r => r.json()).then(() => { $('profile-line').textContent = 'Guest profile — connected to host for daily sync and leaderboards.'; }).catch(() => {});
+        renderProfileLine();
     }
 
     // tutorial completion tracking
@@ -1156,5 +1268,7 @@
         get appState() { return appState; },
     };
 
-    boot();
+    // Hosted sessions start from the remote snapshot when one exists; bound the
+    // handshake wait so a slow platform never blocks local play.
+    Promise.race([initPlatform(), new Promise(res => setTimeout(res, 5000))]).finally(boot);
 })();

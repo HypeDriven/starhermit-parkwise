@@ -41,7 +41,7 @@ Use move count and elapsed time, with unlimited undo and a gradual hint ladder. 
 
 - **Learn:** interactive lessons introduce one rule at a time and require the player to perform the action.
 - **Journey:** authored progression with gradually combined mechanics and periodic mastery stages.
-- **Daily:** one shared seed and ruleset per UTC day, synchronized to platform time.
+- **Daily:** one shared seed and ruleset per UTC calendar day; hosted play keys the day from the device clock (the dev server can still supply its own time).
 - **Practice:** selectable difficulty, restart, undo where rules permit, and no effect on competitive rating.
 - **Challenge:** constrained goals such as move limits, speed targets, altered layouts, or restricted tools.
 - **Score chase:** asynchronous global and friends comparisons using validated seeds and rulesets.
@@ -162,7 +162,7 @@ Follow the skill pack's acceptance gate: deterministic seeds, debug views for co
 - `ui`: responsive DOM shell, focus, localization, settings, overlays, accessibility mirror.
 - `audio`: buses, event mapping, focus/background behavior, decode and memory policy.
 - `content`: versioned levels, themes, tutorials, validation metadata.
-- `platform`: token-aware REST/WebSocket adapter, retries, rate-limit handling, telemetry consent.
+- `platform`: token-aware REST adapter (`platform.js`): fragment launch token read/strip, Bearer on every call, 45-min re-mint, profile nickname, cloud-save mirror, read-only leaderboards. No WebSocket or telemetry (solo game; no documented endpoints).
 
 No module may mutate rules state except through a validated command. Rendering consumes immutable snapshots plus interpolation data. UI state and simulation state are separate so closing a drawer cannot affect a match.
 
@@ -185,22 +185,22 @@ No module may mutate rules state except through a validated command. Rendering c
 
 ### Packaging and launch
 - Ship a browser distribution with `starhermit.txt` at its root, `name=Parkwise`, and `launch=index.html`. Keep source files, secrets, design documents, and source maps outside the uploaded distribution.
-- Read the game scope from the short-lived launch token rather than hard-coding a slug. Use same-origin `/api` and `/ws` routes when hosted. Refresh account tokens through the host shell; never persist access or launch tokens in local storage.
-- Synchronize countdowns and daily boundaries with `GET /api/v1/time` using round-trip-adjusted offset. Treat rate limits and structured `{"error":"..."}` responses as recoverable UI states.
+- Read the game scope from the short-lived launch token rather than hard-coding a slug. Use same-origin `/api` routes when hosted. Re-mint launch tokens via `POST /api/v1/games/{slug}/launch-token` every 45 minutes; never persist access or launch tokens in local storage.
+- The dev server keeps `GET /api/v1/time` for round-trip-adjusted clocks; hosted play has no platform time route and keys the UTC day from the device clock. Treat rate limits and structured `{"error":"..."}` responses as recoverable UI states.
 
 ### Identity, profile, presence, and preferences
-- Support guest practice locally, then offer account sign-in for durable progress. Use the profile display name and avatar only where identity is useful, honor profile privacy, and send throttled presence heartbeats while actively playing.
+- Support guest practice locally, then offer account sign-in for durable progress. Hosted play identifies the player by the account nickname (`GET /api/v1/users/{id}/profile`, never usernames) shown in the title profile line; no presence heartbeats are sent (no documented endpoint).
 - Store accessibility, audio, graphics tier, tutorial completion, camera preference, and rules options through per-game settings. Declare desktop action bindings and read player overrides; touch mappings remain responsive UI controls.
-- Cloud-save progression as a versioned, checksummed document. Resolve conflicts by preserving both snapshots and asking the player when neither is a strict descendant. Never place credentials or private chat in saves.
+- Cloud-save progression as a versioned, checksummed document. Hosted play mirrors the settings+progress doc to the platform cloud-save slot (`GET/PUT /api/v1/me/cloud-saves/{slug}`, zip+base64, remote preferred on conflict, 2 s debounce + pagehide flush, visible sync status); localStorage remains the offline cache. Resolve conflicts by preserving both snapshots and asking the player when neither is a strict descendant. Never place credentials or private chat in saves.
 
 ### Discovery, activity, and social layer
-- Start and end launch activity so playtime is accurate. Surface entitlement or catalog state only in host-owned chrome; the game itself must remain playable without promotional interruption.
+- No launch-activity or telemetry calls are sent from the client (the platform has no per-game endpoints reachable by launch tokens); playtime stays local. Surface entitlement or catalog state only in host-owned chrome; the game itself must remain playable without promotional interruption.
 - Provide a compact friends panel for score comparison and invitations where appropriate. Respect presence visibility and do not expose a hidden or private profile through game UI.
 - Do not create gameplay chat or voice surfaces for the initial release; they are not relevant to the core solo loop. Friends-only leaderboard filtering and shareable challenge seeds supply the social layer without unnecessary communication permissions.
 
 ### Achievements and leaderboards
 - Declare a small static achievement set: first completion, mechanic mastery, a sustained streak, a difficult content milestone, and an accessibility-neutral long-term goal. Keys are stable, lowercase identifiers; unlocks are idempotent.
-- Provide global and friends-filtered boards for the primary metric plus a fair daily/weekly board. Include ruleset, content version, seed, assists, and duration with every submission; reject impossible or stale-version scores.
+- Provide global and friends-filtered boards for the primary metric plus a fair daily/weekly board. Hosted boards are platform-owned and read-only (`GET /api/v1/games/{slug}` → `leaderboardId` → `GET /api/v1/leaderboards/{id}/entries?friendsOnly=`); personal bests stay local and cloud-saved. The dev server's replay-validated board remains for local play. Include ruleset, content version, seed, assists, and duration with every submission; reject impossible or stale-version scores.
 - For globally competitive boards, validate score claims through a lightweight authoritative script using replayable input logs and deterministic seeds. If validation is unavailable, label the board casual and apply plausibility/rate checks.
 
 ### Sessions and transport
