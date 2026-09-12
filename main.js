@@ -940,6 +940,13 @@
     }
 
     function refreshLeaderboard() {
+        // Unranked rounds (Learn, Practice) never reach a board: say so plainly
+        // instead of reporting the leaderboard as offline.
+        const modeDef = MODES.find(m => m.id === session.mode);
+        if (modeDef && !modeDef.ranked) {
+            $('leaderboard-table').innerHTML = '<tr><td>' + modeDef.title + ' rounds are unranked — no leaderboard entry.</td></tr>';
+            return;
+        }
         if (platform.hosted) return refreshHostedLeaderboard();
         const query = new URLSearchParams({ board: 'global', mode: session.mode, seed: String(session.entry.seed), contentVersion: String(C.CONTENT_VERSION) });
         if (session.mode === 'daily') query.set('day', session.entry.day);
@@ -1188,11 +1195,22 @@
     on('btn-settings-close', () => closeOverlay('overlay-settings'));
     on('btn-help-close', () => closeOverlay('overlay-help'));
     on('btn-replay-tutorial', () => { closeOverlay('overlay-settings'); startLearn(0); });
-    on('btn-rail-left', () => { $('rail-left').classList.toggle('open'); });
-    on('btn-rail-right', () => { $('rail-right').classList.toggle('open'); });
+    const syncScrim = () => {
+        const any = $('rail-left').classList.contains('open') || $('rail-right').classList.contains('open');
+        const scrim = $('drawer-scrim');
+        if (scrim) scrim.hidden = !any;
+    };
+    on('btn-rail-left', () => { $('rail-left').classList.toggle('open'); $('rail-right').classList.remove('open'); syncScrim(); });
+    on('btn-rail-right', () => { $('rail-right').classList.toggle('open'); $('rail-left').classList.remove('open'); syncScrim(); });
     // the open drawer covers the status bar, so it needs its own close control
-    on('btn-rail-left-close', () => { $('rail-left').classList.remove('open'); $('btn-rail-left').focus(); });
-    on('btn-rail-right-close', () => { $('rail-right').classList.remove('open'); $('btn-rail-right').focus(); });
+    on('btn-rail-left-close', () => { $('rail-left').classList.remove('open'); syncScrim(); $('btn-rail-left').focus(); });
+    on('btn-rail-right-close', () => { $('rail-right').classList.remove('open'); syncScrim(); $('btn-rail-right').focus(); });
+    // tapping outside an open drawer closes it and restores focus to its opener
+    if ($('drawer-scrim')) $('drawer-scrim').addEventListener('click', () => {
+        const wasLeft = $('rail-left').classList.contains('open');
+        $('rail-left').classList.remove('open'); $('rail-right').classList.remove('open'); syncScrim();
+        (wasLeft ? $('btn-rail-left') : $('btn-rail-right')).focus();
+    });
 
     // settings controls
     for (const bus of ['music', 'effects', 'ambience', 'voice']) {

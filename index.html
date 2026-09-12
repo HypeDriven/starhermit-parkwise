@@ -78,6 +78,9 @@ h1.brand { font-size:clamp(30px,6vw,52px); font-weight:800; letter-spacing:.06em
   #rail-left { left:0; transform:translateX(-105%); }
   #rail-right { right:0; transform:translateX(105%); }
   #rail-left.open, #rail-right.open { transform:none; box-shadow:0 0 40px rgba(0,0,0,.6); }
+  /* outside-tap dismissal for open drawers */
+  #drawer-scrim { position:fixed; inset:0; z-index:39; background:rgba(0,0,0,.35); }
+  #drawer-scrim[hidden] { display:none; }
   .drawer-toggle { display:inline-block; }
 }
 /* portrait mobile: square-ish playfield, thumb tray */
@@ -174,6 +177,7 @@ body.reduced-motion * { transition:none !important; animation:none !important; }
         <button class="btn ghost" id="btn-pause" aria-label="Pause game">II Pause</button>
         <button class="btn ghost drawer-toggle" id="btn-rail-right" aria-label="Open actions panel">&#9881;</button>
       </div>
+      <div id="drawer-scrim" hidden></div>
       <aside id="rail-left" aria-label="Objective and progress">
         <button class="btn ghost drawer-toggle" id="btn-rail-left-close">Close panel</button>
         <div class="rail-card">
