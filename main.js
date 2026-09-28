@@ -17,7 +17,8 @@
 
     const defaults = {
         volumes: { music: 0.6, effects: 0.8, ambience: 0.4, voice: 0.7 },
-        muted: false, quality: 'medium', theme: null,
+        muted: false, theme: null,
+        graphics: { preset: 'auto', render_scale: 1, adaptive: true, show_fps: false },
         reducedMotion: false, highContrast: false, largeText: false,
         captions: true, holdDrag: true, lefty: false,
     };
@@ -37,8 +38,15 @@
         } catch (e) { /* storage unavailable: session continues without persistence */ }
     }
 
+    // Graphics settings live in settings.graphics; the old low/medium/high tier migrates to a preset.
+    function normalizeGraphics(s) {
+        const legacy = { low: 'low', high: 'high' }[s.quality];
+        s.graphics = Object.assign({}, defaults.graphics, !s.graphics && legacy ? { preset: legacy } : null, s.graphics);
+        delete s.quality;
+    }
     const settings = Object.assign({}, defaults, loadJson(SETTINGS_KEY, {}));
     settings.volumes = Object.assign({}, defaults.volumes, settings.volumes);
+    normalizeGraphics(settings);
     const progress = Object.assign({
         journeyUnlocked: 0, stars: {}, wins: 0, winStreak: 0,
         tutorialsDone: [], achievements: {}, dailiesDone: {}, lastDaily: null,
@@ -93,6 +101,7 @@
         if (doc.settings && typeof doc.settings === 'object') {
             Object.assign(settings, defaults, doc.settings);
             settings.volumes = Object.assign({}, defaults.volumes, settings.volumes);
+            normalizeGraphics(settings);
         }
         if (doc.progress && typeof doc.progress === 'object') {
             Object.assign(progress, doc.progress);
@@ -102,6 +111,8 @@
         saveJson(PROGRESS_KEY, progress);
         applySettingsToDom();
         themeSel.value = settings.theme || C.THEMES[0].id;
+        render.setGraphics(settings.graphics);
+        syncGraphicsUi();
         return true;
     }
 
@@ -159,7 +170,6 @@
             A.setVolume(bus, settings.volumes[bus]);
         }
         $('opt-mute').checked = settings.muted;
-        $('opt-quality').value = settings.quality;
         $('opt-reduced-motion').checked = settings.reducedMotion;
         $('opt-high-contrast').checked = settings.highContrast;
         $('opt-large-text').checked = settings.largeText;
@@ -294,6 +304,7 @@
 
     // ================= renderer (Three.js rooftop diorama) =================
     const CELL = 1.6;
+    const G = window.PARKWISE_GFX;
     const render = (function () {
         const canvas = $('game-canvas');
         let renderer = null;
@@ -306,7 +317,8 @@
             return {
                 buildBoard() {}, syncVehicles() {}, flashInvalid() {}, select() {},
                 highlightHint(move) { if (session) session.selected = move.v; },
-                applyQuality() {}, applyTheme() {}, resetCamera() {}, resize() {}, frame() {},
+                applyQuality() {}, setGraphics() {}, graphicsInfo() { return null; }, onInfo() {},
+                applyTheme() {}, resetCamera() {}, resize() {}, frame() {},
                 celebrate() {}, pickCell() { return null; }, pickVehicle() { return -1; }, screenPos() { return null; },
                 pickMarker() { return null; }, dispose() {},
             };
@@ -314,6 +326,22 @@
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1.05;
+        renderer.shadowMap.type = THREE.PCFShadowMap;
+
+        // ---- GPU detection → Auto preset (software renderers get Low; touch devices cap at Balanced)
+        const gl = renderer.getContext();
+        let gpu = '';
+        try {
+            gpu = String(gl.getParameter(gl.RENDERER) || '');
+            if (!gpu || /^webkit/i.test(gpu)) {
+                const ext = gl.getExtension('WEBGL_debug_renderer_info');
+                if (ext) gpu = String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || gpu);
+            }
+        } catch (e) { /* renderer string masked */ }
+        const coarse = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches);
+        const mobile = coarse || /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || '');
+        const detected = G.autoPreset(gpu, mobile);
+        let q = G.resolve(settings.graphics, detected);
 
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 200);
@@ -329,8 +357,11 @@
             const halfW = (R.GRID * CELL) / 2 + 1.4;                 // lot width + parapet
             const halfV = ((R.GRID * CELL) / 2) * (CAM_HOME.pos.y / home) + 1.0; // depth foreshortened by the tilt
             const need = Math.max(halfW / tanH, halfV / tanV);
-            camera.position.copy(CAM_HOME.look).addScaledVector(dir, Math.max(home, need));
+            const dist = Math.max(home, need);
+            camera.position.copy(CAM_HOME.look).addScaledVector(dir, dist);
             camera.lookAt(CAM_HOME.look);
+            // fog starts behind the lot at any camera distance, so the board never hazes
+            if (scene.fog) { scene.fog.near = dist + 8; scene.fog.far = dist + 46; }
         }
         function resetCamera() { fitCamera(); }
         resetCamera();
@@ -341,9 +372,13 @@
         key.position.set(8, 14, 6);
         key.castShadow = true;
         key.shadow.mapSize.set(1024, 1024);
+        // shadow frustum fitted to the rooftop slab + props (half extent ≈ 7.6)
         const sc = 8;
-        key.shadow.camera.left = -sc; key.shadow.camera.right = sc;
-        key.shadow.camera.top = sc; key.shadow.camera.bottom = -sc;
+        Object.assign(key.shadow.camera, { left: -sc, right: sc, top: sc, bottom: -sc, near: 4, far: 34 });
+        key.shadow.camera.updateProjectionMatrix();
+        key.shadow.bias = -0.0004;
+        key.shadow.normalBias = 0.02;
+        key.shadow.radius = 3;
         scene.add(key);
 
         // layers: 0 env, 1 gameplay, 2 markers/ghosts
@@ -358,7 +393,16 @@
         let exitGate = null;
         let theme = C.THEMES[0];
         let vfx = []; // pooled celebration particles
+        let ambient = null; // detailed-scene animated bits: chevrons, beacon, dust
+        let builtWith = null; // detail|particles the current board was built with
         const avRng = R.rng(1234); // audiovisual variant stream (never rules)
+
+        // ---- post-processing + image-based lighting (lazy module, same three.js revision)
+        let POST = null, postLoadFailed = false, postFailed = false;
+        let composer = null, postKey = null, envTex = null;
+        let infoListener = null;
+        import('./post.js').then(m => { POST = m; applyEnv(); postKey = null; if (infoListener) infoListener(); })
+            .catch(() => { postLoadFailed = true; if (infoListener) infoListener(); });
 
         function cellToWorld(x, y) {
             return { x: (x - (R.GRID - 1) / 2) * CELL, z: (y - (R.GRID - 1) / 2) * CELL };
@@ -373,7 +417,66 @@
             scene.remove(g);
         }
 
+        // ---- shared procedural textures (built once, never disposed with the board)
+        const texCache = {};
+        function canvasTexture(name, size, draw, repeat) {
+            if (texCache[name]) return texCache[name];
+            const cv = document.createElement('canvas');
+            cv.width = size[0]; cv.height = size[1];
+            draw(cv.getContext('2d'), size[0], size[1], R.rng(0x5EED + name.length * 97));
+            const t = new THREE.CanvasTexture(cv);
+            t.colorSpace = THREE.SRGBColorSpace;
+            t.wrapS = t.wrapT = THREE.RepeatWrapping;
+            if (repeat) t.repeat.set(repeat, repeat);
+            t.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+            texCache[name] = t;
+            return t;
+        }
+        // near-white grain so the theme colour still reads as the surface colour
+        function speckle(ctx, w, h, rnd, base, dots, blotches) {
+            ctx.fillStyle = base; ctx.fillRect(0, 0, w, h);
+            for (let i = 0; i < blotches; i++) {
+                const x = rnd() * w, y = rnd() * h, r = 12 + rnd() * 40;
+                const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+                g.addColorStop(0, `rgba(0,0,0,${0.04 + rnd() * 0.06})`); g.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2);
+            }
+            for (let i = 0; i < dots; i++) {
+                const v = 150 + Math.floor(rnd() * 105);
+                ctx.fillStyle = `rgba(${v},${v},${v},0.55)`;
+                ctx.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 1.5, 1 + rnd() * 1.5);
+            }
+        }
+        const asphaltTex = () => canvasTexture('asphalt', [256, 256], (c, w, h, r) => speckle(c, w, h, r, '#f0f0f0', 5200, 26), 3);
+        const concreteTex = () => canvasTexture('concrete', [256, 256], (c, w, h, r) => {
+            speckle(c, w, h, r, '#f4f4f4', 1800, 40);
+            c.strokeStyle = 'rgba(0,0,0,0.12)'; c.lineWidth = 2;
+            for (let p = 0; p <= w; p += 64) { c.beginPath(); c.moveTo(p, 0); c.lineTo(p, h); c.moveTo(0, p); c.lineTo(w, p); c.stroke(); }
+        }, 2);
+        const windowTex = () => canvasTexture('windows', [64, 128], (c, w, h, r) => {
+            c.fillStyle = '#000'; c.fillRect(0, 0, w, h);
+            for (let y = 6; y < h - 6; y += 10) for (let x = 5; x < w - 5; x += 9) {
+                if (r() < 0.42) { const v = 170 + Math.floor(r() * 85); c.fillStyle = `rgb(${v},${Math.floor(v * 0.86)},${Math.floor(v * 0.6)})`; c.fillRect(x, y, 5, 6); }
+            }
+        });
+
+        // Rounded slab: rounded rectangle footprint (sx × sz) extruded to height h with bevelled edges; base at y = 0.
+        function roundedSlab(sx, sz, h, r, bevel) {
+            const hx = sx / 2 - bevel, hz = sz / 2 - bevel;
+            r = Math.max(0.01, Math.min(r, hx - 0.01, hz - 0.01));
+            const s = new THREE.Shape();
+            s.moveTo(-hx + r, -hz); s.lineTo(hx - r, -hz); s.quadraticCurveTo(hx, -hz, hx, -hz + r);
+            s.lineTo(hx, hz - r); s.quadraticCurveTo(hx, hz, hx - r, hz);
+            s.lineTo(-hx + r, hz); s.quadraticCurveTo(-hx, hz, -hx, hz - r);
+            s.lineTo(-hx, -hz + r); s.quadraticCurveTo(-hx, -hz, -hx + r, -hz);
+            const g = new THREE.ExtrudeGeometry(s, { depth: Math.max(0.01, h - 2 * bevel), bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3, curveSegments: 5 });
+            g.rotateX(-Math.PI / 2);
+            g.translate(0, bevel, 0);
+            return g;
+        }
+
         function makeVehicleMesh(v, isTarget, colorHex) {
+            if (q.detail === 'detailed') return makeDetailedVehicle(v, isTarget, colorHex);
             const grp = new THREE.Group();
             const L = v.len * CELL * 0.92, W = CELL * 0.72, H = 0.5;
             const mat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.45, metalness: 0.25 });
@@ -405,34 +508,180 @@
             return grp;
         }
 
+        // Detailed vehicle: rounded clear-coated body, glass cabin, axles, light bars.
+        // Built along +x (front = +x), then turned for upright vehicles.
+        function makeDetailedVehicle(v, isTarget, colorHex) {
+            const grp = new THREE.Group();
+            const car = new THREE.Group();
+            if (v.ori === 'v') car.rotation.y = -Math.PI / 2;
+            grp.add(car);
+            const L = v.len * CELL * 0.92, W = CELL * 0.72, CL = 0.13;
+            const paint = new THREE.MeshPhysicalMaterial({
+                color: colorHex, roughness: 0.4, metalness: 0.15, clearcoat: 0.7, clearcoatRoughness: 0.1,
+                emissive: isTarget ? colorHex : 0x000000, emissiveIntensity: isTarget ? 0.22 : 0,
+            });
+            const glass = new THREE.MeshPhysicalMaterial({ color: 0x16202c, roughness: 0.06, metalness: 0.3, clearcoat: 1, clearcoatRoughness: 0.03 });
+            const rubber = new THREE.MeshStandardMaterial({ color: 0x14171b, roughness: 0.85 });
+            const head = new THREE.MeshStandardMaterial({ color: 0xfff4dc, emissive: 0xfff1d0, emissiveIntensity: 1.5 });
+            const tail = new THREE.MeshStandardMaterial({ color: 0xff3b30, emissive: 0xff2a1a, emissiveIntensity: 1.8 });
+            const add = (geo, mat, x, y, z, cast) => {
+                const m = new THREE.Mesh(geo, mat);
+                m.position.set(x, y, z);
+                m.castShadow = !!cast;
+                car.add(m);
+                return m;
+            };
+            let bodyTop;
+            if (v.len >= 3) {
+                // box van: tall cargo body at the back, lower cab with windscreen at the front
+                add(roundedSlab(L * 0.7, W, 0.8, 0.16, 0.06), paint, -L * 0.15, CL, 0, true);
+                add(roundedSlab(L * 0.31, W * 0.96, 0.46, 0.24, 0.08), paint, L * 0.345, CL, 0, true);
+                add(roundedSlab(L * 0.17, W * 0.86, 0.24, 0.1, 0.05), glass, L * 0.3, CL + 0.42, 0, true);
+                bodyTop = CL + 0.8;
+            } else {
+                add(roundedSlab(L, W, 0.42, 0.3, 0.08), paint, 0, CL, 0, true);
+                add(roundedSlab(L * 0.52, W * 0.84, 0.3, 0.22, 0.06), glass, -L * 0.05, CL + 0.38, 0, true);
+                add(roundedSlab(L * 0.42, W * 0.78, 0.05, 0.18, 0.02), paint, -L * 0.06, CL + 0.67, 0, false);
+                bodyTop = CL + 0.42;
+            }
+            // axles: one cylinder per axle, tyres peek out at both sides
+            const axle = new THREE.CylinderGeometry(0.17, 0.17, W * 0.98, 16);
+            axle.rotateX(Math.PI / 2);
+            add(axle, rubber, L / 2 - 0.42, 0.17, 0, true);
+            add(axle, rubber, -L / 2 + 0.42, 0.17, 0, true);
+            // light bars: warm head lights at the front, red tail lights at the back (bloom sources)
+            const bar = new THREE.BoxGeometry(0.05, 0.07, W * 0.72);
+            add(bar, head, L / 2 - 0.01, CL + 0.26, 0);
+            add(bar, tail, -L / 2 + 0.01, CL + 0.3, 0);
+            if (isTarget) {
+                // white racing stripe: the target reads by shape, not colour alone
+                const stripeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
+                add(new THREE.BoxGeometry(L * 0.9, 0.012, 0.16), stripeMat, 0, bodyTop + 0.004, 0);
+                if (v.len < 3) add(new THREE.BoxGeometry(L * 0.4, 0.012, 0.16), stripeMat, -L * 0.06, CL + 0.724, 0);
+            }
+            grp.layers.set(LAYER_GAME);
+            grp.traverse(o => o.layers.set(LAYER_GAME));
+            return grp;
+        }
+
+        // Distant city blocks under the rooftop (one instanced draw), fogged into the sky.
+        function buildSkyline(group) {
+            const rnd = R.rng(0xC17E);
+            const N = 46;
+            const facade = new THREE.MeshStandardMaterial({
+                color: new THREE.Color(theme.fog).lerp(new THREE.Color(0x2a3444), 0.55), roughness: 0.9,
+                emissive: 0xffe2b0, emissiveMap: windowTex(),
+                emissiveIntensity: theme.id === 'night' ? 1.3 : theme.id === 'dusk' || theme.id === 'contrast' ? 0.6 : 0.12,
+            });
+            const roof = new THREE.MeshStandardMaterial({ color: new THREE.Color(theme.fog).multiplyScalar(0.42), roughness: 0.95 });
+            const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), [facade, facade, roof, roof, facade, facade], N);
+            const m = new THREE.Matrix4(), p = new THREE.Vector3(), s = new THREE.Vector3(), qq = new THREE.Quaternion();
+            for (let i = 0; i < N; i++) {
+                const a = (i / N) * Math.PI * 2 + rnd() * 0.12;
+                const r = 16 + rnd() * 20;
+                const top = -15 + rnd() * 11, bottom = -48;
+                s.set(2.4 + rnd() * 3.5, top - bottom, 2.4 + rnd() * 3.5);
+                p.set(Math.cos(a) * r, (top + bottom) / 2, Math.sin(a) * r);
+                qq.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rnd() * 0.5);
+                mesh.setMatrixAt(i, m.compose(p, qq, s));
+            }
+            group.add(mesh);
+        }
+
+        function buildDetailedProps(group, half, size, exZ) {
+            const deco = R.rng((session ? session.entry.seed : 1) ^ 0xDEC0);
+            const metal = new THREE.MeshStandardMaterial({ color: 0x7b8594, roughness: 0.45, metalness: 0.6 });
+            const dark = new THREE.MeshStandardMaterial({ color: 0x2a3038, roughness: 0.6, metalness: 0.4 });
+            const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; group.add(m); return m; };
+            // seeded rooftop props: AC units with fan grilles and round vents
+            for (let i = 0; i < 7; i++) {
+                const pw = 0.5 + deco() * 0.6, ph = 0.3 + deco() * 0.7, pd = 0.5 + deco() * 0.6;
+                const side = Math.floor(deco() * 4);
+                const off = half + 1.2 + deco() * 0.8;
+                const along = (deco() - 0.5) * (size + 2);
+                const x = side <= 1 ? along : side === 2 ? -off : off;
+                const z = side === 0 ? -off : side === 1 ? off : along;
+                if (deco() < 0.6) {
+                    add(roundedSlab(pw, pd, ph, 0.06, 0.03), metal, x, 0, z);
+                    add(new THREE.CylinderGeometry(Math.min(pw, pd) * 0.34, Math.min(pw, pd) * 0.34, 0.03, 18), dark, x, ph + 0.01, z);
+                } else {
+                    add(new THREE.CylinderGeometry(0.16, 0.2, ph + 0.3, 14), metal, x, (ph + 0.3) / 2, z);
+                    add(new THREE.CylinderGeometry(0.3, 0.3, 0.06, 14), metal, x, ph + 0.33, z);
+                }
+            }
+            // lamp posts at two corners (warm heads bloom at dusk/night)
+            const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff3d6, emissive: 0xffe0a8, emissiveIntensity: 2.6 });
+            for (const [lx, lz] of [[-half - 1.5, -half - 1.5], [half + 1.5, half + 1.5]]) {
+                add(new THREE.CylinderGeometry(0.05, 0.07, 2.4, 10), dark, lx, 1.2, lz);
+                add(new THREE.BoxGeometry(0.5, 0.08, 0.22), lampMat, lx + (lx < 0 ? 0.2 : -0.2), 2.42, lz);
+            }
+            // antenna mast with a blinking beacon
+            add(new THREE.CylinderGeometry(0.03, 0.05, 3.1, 8), metal, half + 1.6, 1.55, -half - 1.6);
+            const beaconMat = new THREE.MeshStandardMaterial({ color: 0xff4040, emissive: 0xff2020, emissiveIntensity: 3 });
+            const beacon = add(new THREE.SphereGeometry(0.08, 12, 8), beaconMat, half + 1.6, 3.15, -half - 1.6);
+            beacon.castShadow = false;
+            // exit gate: bollards and animated chevrons pointing out of the lot
+            const bollard = new THREE.MeshStandardMaterial({ color: 0xffc107, roughness: 0.5 });
+            add(new THREE.CylinderGeometry(0.09, 0.09, 0.55, 12), bollard, half + 0.55, 0.28, exZ - CELL * 0.52);
+            add(new THREE.CylinderGeometry(0.09, 0.09, 0.55, 12), bollard, half + 0.55, 0.28, exZ + CELL * 0.52);
+            const chev = new THREE.Shape();
+            chev.moveTo(-0.12, -0.34); chev.lineTo(0.02, -0.34); chev.lineTo(0.2, 0); chev.lineTo(0.02, 0.34); chev.lineTo(-0.12, 0.34); chev.lineTo(0.06, 0);
+            const chevGeo = new THREE.ShapeGeometry(chev);
+            chevGeo.rotateX(-Math.PI / 2);
+            const chevrons = [];
+            for (let i = 0; i < 3; i++) {
+                const mat = new THREE.MeshStandardMaterial({ color: 0x9dffd0, emissive: 0x3dffa0, emissiveIntensity: 1.2 });
+                const m = new THREE.Mesh(chevGeo, mat);
+                m.position.set(half + 0.45 + i * 0.36, 0.125, exZ);
+                group.add(m);
+                chevrons.push(m);
+            }
+            // drifting dust motes (cosmetic, environment layer, never picked)
+            let dust = null;
+            if (q.particles === 'high') {
+                const n = 110, pos = new Float32Array(n * 3), prnd = R.rng(0xD057);
+                for (let i = 0; i < n; i++) { pos[i * 3] = (prnd() - 0.5) * 15; pos[i * 3 + 1] = 0.3 + prnd() * 4; pos[i * 3 + 2] = (prnd() - 0.5) * 15; }
+                const geo = new THREE.BufferGeometry();
+                geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+                dust = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xfff6e0, size: 0.06, transparent: true, opacity: 0.6, depthWrite: false }));
+                group.add(dust);
+            }
+            return { chevrons, beacon, dust };
+        }
+
         function buildBoard(entry) {
             disposeGroup(boardGroup);
             for (const p of vfx) { p.m.geometry.dispose(); p.m.material.dispose(); }
             vfx = [];
             vehicleViews = [];
             markerMeshes = [];
+            ambient = null;
+            builtWith = q.detail + '|' + q.particles;
+            const detailed = q.detail === 'detailed';
             boardGroup = new THREE.Group();
             scene.add(boardGroup);
             theme = C.THEMES.find(t => t.id === (settings.theme || entry.theme)) || C.THEMES[0];
             scene.background = new THREE.Color(theme.sky);
             scene.fog = new THREE.Fog(theme.fog, 24, 60);
+            hemi.color.set(detailed ? theme.fog : 0xffffff);
             key.color.set(theme.key);
+            fitCamera();
 
             const size = R.GRID * CELL;
             // rooftop slab
             const slab = new THREE.Mesh(new THREE.BoxGeometry(size + 4.4, 0.8, size + 4.4),
-                new THREE.MeshStandardMaterial({ color: theme.slab, roughness: 0.95 }));
+                new THREE.MeshStandardMaterial({ color: theme.slab, roughness: 0.95, map: detailed ? concreteTex() : null }));
             slab.position.y = -0.4;
             slab.receiveShadow = true;
             boardGroup.add(slab);
             // parking surface
             const lot = new THREE.Mesh(new THREE.BoxGeometry(size + 0.5, 0.1, size + 0.5),
-                new THREE.MeshStandardMaterial({ color: theme.ground, roughness: 0.9 }));
+                new THREE.MeshStandardMaterial({ color: theme.ground, roughness: 0.9, map: detailed ? asphaltTex() : null }));
             lot.position.y = 0.001;
             lot.receiveShadow = true;
             boardGroup.add(lot);
-            // grid lines + cell markers (readable without effects)
-            const lineMat = new THREE.MeshBasicMaterial({ color: theme.line });
+            // grid lines + cell markers (readable without effects); kept just under the bloom threshold
+            const lineMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(theme.line).multiplyScalar(0.9) });
             for (let i = 0; i <= R.GRID; i++) {
                 const p = (i - R.GRID / 2) * CELL;
                 const h = new THREE.Mesh(new THREE.BoxGeometry(size, 0.02, 0.045), lineMat);
@@ -442,13 +691,21 @@
                 boardGroup.add(h); boardGroup.add(vl);
             }
             // parapet walls with a gap at the exit
-            const wallMat = new THREE.MeshStandardMaterial({ color: theme.parapet, roughness: 0.85 });
+            const wallMat = new THREE.MeshStandardMaterial({ color: theme.parapet, roughness: 0.85, map: detailed ? concreteTex() : null });
+            const capMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(theme.parapet).offsetHSL(0, -0.05, 0.14), roughness: 0.7 });
             const exZ = cellToWorld(0, R.EXIT_ROW).z;
             const mkWall = (w, d, x, z) => {
                 const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.7, d), wallMat);
                 m.position.set(x, 0.35, z);
                 m.castShadow = true;
+                m.receiveShadow = detailed;
                 boardGroup.add(m);
+                if (detailed) {
+                    const cap = new THREE.Mesh(new THREE.BoxGeometry(w + 0.08, 0.07, d + 0.08), capMat);
+                    cap.position.set(x, 0.735, z);
+                    cap.castShadow = true;
+                    boardGroup.add(cap);
+                }
             };
             const half = size / 2;
             mkWall(size + 1, 0.35, 0, -half - 0.35);
@@ -463,18 +720,23 @@
                 new THREE.MeshStandardMaterial({ color: 0x2f9e6e, emissive: 0x2f9e6e, emissiveIntensity: 0.7 }));
             exitGate.position.set(half + 0.9, 0.08, exZ);
             boardGroup.add(exitGate);
-            // seeded rooftop props: vents, AC boxes, antenna (visual seed deterministic)
-            const deco = R.rng(entry.seed ^ 0xDEC0);
-            const propMat = new THREE.MeshStandardMaterial({ color: 0x6b7686, roughness: 0.8, metalness: 0.3 });
-            for (let i = 0; i < 7; i++) {
-                const pw = 0.4 + deco() * 0.7, ph = 0.3 + deco() * 1.1, pd = 0.4 + deco() * 0.7;
-                const prop = new THREE.Mesh(new THREE.BoxGeometry(pw, ph, pd), propMat);
-                const side = Math.floor(deco() * 4);
-                const off = half + 1.2 + deco() * 0.8;
-                const along = (deco() - 0.5) * (size + 2);
-                prop.position.set(side === 0 ? along : side === 1 ? along : side === 2 ? -off : off, ph / 2, side === 0 ? -off : side === 1 ? off : along);
-                prop.castShadow = true;
-                boardGroup.add(prop);
+            if (detailed) {
+                ambient = buildDetailedProps(boardGroup, half, size, exZ);
+                buildSkyline(boardGroup);
+            } else {
+                // seeded rooftop props: vents, AC boxes, antenna (visual seed deterministic)
+                const deco = R.rng(entry.seed ^ 0xDEC0);
+                const propMat = new THREE.MeshStandardMaterial({ color: 0x6b7686, roughness: 0.8, metalness: 0.3 });
+                for (let i = 0; i < 7; i++) {
+                    const pw = 0.4 + deco() * 0.7, ph = 0.3 + deco() * 1.1, pd = 0.4 + deco() * 0.7;
+                    const prop = new THREE.Mesh(new THREE.BoxGeometry(pw, ph, pd), propMat);
+                    const side = Math.floor(deco() * 4);
+                    const off = half + 1.2 + deco() * 0.8;
+                    const along = (deco() - 0.5) * (size + 2);
+                    prop.position.set(side === 0 ? along : side === 1 ? along : side === 2 ? -off : off, ph / 2, side === 0 ? -off : side === 1 ? off : along);
+                    prop.castShadow = true;
+                    boardGroup.add(prop);
+                }
             }
             // selection ring
             selectRing = new THREE.Mesh(new THREE.RingGeometry(0.62, 0.78, 32),
@@ -491,10 +753,9 @@
                 const mesh = makeVehicleMesh(v, v.target, color);
                 mesh.userData.vehicleIndex = i;
                 boardGroup.add(mesh);
-                vehicleViews.push({ mesh, anim: null });
+                vehicleViews.push({ mesh, anim: null, lift: 0 });
             });
             syncVehicles(false);
-            applyQuality();
         }
 
         function vehicleCenter(v) {
@@ -511,9 +772,9 @@
                 const p = vehicleCenter(v);
                 view.shake = 0;
                 if (animate && !settings.reducedMotion) {
-                    view.anim = { from: view.mesh.position.clone(), to: new THREE.Vector3(p.x, 0, p.z), t: 0 };
+                    view.anim = { from: view.mesh.position.clone().setY(0), to: new THREE.Vector3(p.x, 0, p.z), t: 0 };
                 } else {
-                    view.mesh.position.set(p.x, 0, p.z);
+                    view.mesh.position.set(p.x, view.mesh.position.y, p.z);
                     view.anim = null;
                 }
             });
@@ -578,7 +839,8 @@
         function spawnConfetti() {
             if (settings.reducedMotion || !boardGroup) return;
             const geo = new THREE.BoxGeometry(0.08, 0.08, 0.08);
-            for (let i = 0; i < 60; i++) {
+            const count = q.particles === 'high' ? 120 : 60;
+            for (let i = 0; i < count; i++) {
                 const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: theme.palette[i % theme.palette.length] }));
                 const p = cellToWorld(R.GRID - 1, R.EXIT_ROW);
                 m.position.set(p.x + 0.8, 0.4, p.z);
@@ -626,38 +888,125 @@
             return { x: wx, y: wy };
         }
 
-        function applyQuality() {
-            const q = settings.quality;
-            const dpr = window.devicePixelRatio || 1;
-            renderer.setPixelRatio(q === 'high' ? Math.min(dpr, 2) : q === 'medium' ? Math.min(dpr, 1.5) : 1);
-            renderer.shadowMap.enabled = q !== 'low';
-            key.castShadow = q !== 'low';
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-            resize();
+        // ---- graphics settings (applied live) ----
+        let adaptiveScale = 1, frameTimes = [], fps = 0;
+        let size = [0, 0], pixelRatio = 0;
+
+        function markMaterials() {
+            scene.traverse(o => { if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { m.needsUpdate = true; }); });
         }
+        function applyEnv() {
+            const want = q.reflections === 'on';
+            if (want && !envTex && POST) {
+                try { envTex = POST.makeEnvironment(renderer); } catch (e) { envTex = null; }
+            }
+            const on = want && !!envTex;
+            if (!!scene.environment !== on) { scene.environment = on ? envTex : null; markMaterials(); }
+            scene.environmentIntensity = 0.45;
+            hemi.intensity = on ? 0.5 : 0.85;
+        }
+        function fpsVisible(on) {
+            let el = $('fps-meter');
+            if (on && !el) {
+                el = document.createElement('div');
+                el.id = 'fps-meter';
+                el.setAttribute('aria-hidden', 'true');
+                el.textContent = '— fps';
+                $('canvas-wrap').appendChild(el);
+            }
+            if (el) el.hidden = !on;
+        }
+        function setGraphics(saved) {
+            q = G.resolve(saved, detected);
+            const mapSize = G.SHADOW_MAP[q.shadows];
+            const had = renderer.shadowMap.enabled;
+            renderer.shadowMap.enabled = mapSize > 0;
+            key.castShadow = mapSize > 0;
+            if (mapSize > 0 && key.shadow.mapSize.x !== mapSize) {
+                key.shadow.mapSize.set(mapSize, mapSize);
+                if (key.shadow.map) { key.shadow.map.dispose(); key.shadow.map = null; }
+            }
+            if (had !== renderer.shadowMap.enabled) markMaterials(); // shadow state is baked into shaders
+            applyEnv();
+            adaptiveScale = 1;
+            frameTimes = [];
+            postKey = null;
+            pixelRatio = 0; // re-apply size on the next frame
+            fpsVisible(q.showFps);
+            document.body.dataset.gfxPreset = q.preset;
+            canvas.dataset.gfxPreset = q.preset;
+            if (session && boardGroup && builtWith !== q.detail + '|' + q.particles) buildBoard(session.entry);
+        }
+        function applyQuality() { setGraphics(settings.graphics); }
         function applyTheme() { if (session) buildBoard(session.entry); }
 
-        function resize() {
+        function targetRatio() {
+            return Math.min(window.devicePixelRatio || 1, q.cap) * q.scale * adaptiveScale;
+        }
+        function applySize(force) {
             const w = canvas.clientWidth, h = canvas.clientHeight;
-            if (w > 0 && h > 0) {
-                renderer.setSize(w, h, false);
-                camera.aspect = w / h;
-                camera.updateProjectionMatrix();
-                fitCamera();
+            if (!(w > 0 && h > 0)) return false;
+            const ratio = targetRatio();
+            if (!force && w === size[0] && h === size[1] && ratio === pixelRatio) return false;
+            size = [w, h];
+            pixelRatio = ratio;
+            renderer.setPixelRatio(ratio);
+            renderer.setSize(w, h, false);
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+            fitCamera();
+            return true;
+        }
+        function resize() { applySize(true); }
+
+        function disposeComposer() {
+            if (!composer) return;
+            for (const p of composer.passes) if (p.dispose) p.dispose();
+            composer.dispose();
+            composer = null;
+        }
+        function buildPost() {
+            disposeComposer();
+            if (!q.post || !POST || postFailed) return;
+            try {
+                composer = POST.buildComposer(renderer, scene, camera, q, size[0], size[1], pixelRatio, q.antialias === 'msaa');
+            } catch (e) {
+                // post-processing is an enhancement: render directly and say so in the Graphics panel
+                postFailed = true;
+                composer = null;
+                if (infoListener) infoListener();
             }
+        }
+        // Adaptive resolution: ~90-frame average; step down 0.1 when slow, back up 0.05 when fast.
+        function adapt(ms) {
+            frameTimes.push(ms);
+            if (frameTimes.length < 90) return;
+            const avg = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
+            frameTimes = [];
+            fps = 1000 / avg;
+            const el = $('fps-meter');
+            if (el && !el.hidden) el.textContent = `${Math.round(fps)} fps · ${Math.round(pixelRatio * 100) / 100}×`;
+            if (!q.adaptive) return;
+            if (avg > 26) adaptiveScale = Math.max(0.6, adaptiveScale - 0.1);
+            else if (avg < 14 && adaptiveScale < 1) adaptiveScale = Math.min(1, adaptiveScale + 0.05);
         }
 
         let last = performance.now();
         function frame(now) {
-            const dt = Math.min(0.05, (now - last) / 1000);
+            const ms = Math.min(250, now - last);
+            const dt = Math.min(0.05, ms / 1000);
             last = now;
-            for (const view of vehicleViews) {
+            adapt(ms);
+            const moving = !settings.reducedMotion;
+            const sel = session && !session.over ? session.selected : -1;
+            vehicleViews.forEach((view, i) => {
                 if (view.anim) {
                     view.anim.t += dt / 0.16;
-                    if (view.anim.t >= 1) { view.mesh.position.copy(view.anim.to); view.anim = null; }
+                    if (view.anim.t >= 1) { view.mesh.position.set(view.anim.to.x, view.mesh.position.y, view.anim.to.z); view.anim = null; }
                     else {
                         const e = 1 - Math.pow(1 - view.anim.t, 3);
-                        view.mesh.position.lerpVectors(view.anim.from, view.anim.to, e);
+                        const y = view.mesh.position.y;
+                        view.mesh.position.lerpVectors(view.anim.from, view.anim.to, e).setY(y);
                     }
                 }
                 if (view.shake) {
@@ -666,7 +1015,12 @@
                     if (view.shake > 0 && !view.anim) view.mesh.position.x = view.shakeBaseX + Math.sin(now * 0.09) * 0.03 * view.shake;
                     if (view.shake <= 0) { view.shake = 0; if (!view.anim) view.mesh.position.x = view.shakeBaseX; }
                 }
-            }
+                // selection pose: the selected vehicle lifts slightly (gentle idle bob unless reduced motion)
+                if (q.detail === 'detailed') {
+                    const target = i === sel ? 0.07 + (moving ? Math.sin(now * 0.004) * 0.025 : 0) : 0;
+                    view.mesh.position.y += (target - view.mesh.position.y) * Math.min(1, dt * 14);
+                } else if (view.mesh.position.y !== 0) view.mesh.position.y = 0;
+            });
             for (let i = vfx.length - 1; i >= 0; i--) {
                 const p = vfx[i];
                 p.life -= dt;
@@ -675,7 +1029,29 @@
                 p.m.rotation.x += dt * 5; p.m.rotation.y += dt * 7;
                 if (p.life <= 0) { boardGroup.remove(p.m); p.m.material.dispose(); vfx.splice(i, 1); }
             }
-            if (exitGate) exitGate.material.emissiveIntensity = 0.55 + Math.sin(now * 0.004) * 0.2;
+            if (exitGate) exitGate.material.emissiveIntensity = moving ? 0.55 + Math.sin(now * 0.004) * 0.2 : 0.6;
+            if (ambient) {
+                ambient.chevrons.forEach((c, i) => {
+                    c.material.emissiveIntensity = moving ? 0.5 + 1.2 * Math.max(0, Math.sin(now * 0.005 - i * 0.9)) : 1.1;
+                });
+                ambient.beacon.material.emissiveIntensity = moving ? ((now % 1600) < 260 ? 4 : 0.35) : 2;
+                if (ambient.dust && moving) {
+                    const a = ambient.dust.geometry.attributes.position;
+                    for (let i = 0; i < a.count; i++) {
+                        let y = a.getY(i) + dt * (0.08 + (i % 5) * 0.03);
+                        if (y > 4.4) y = 0.3;
+                        a.setY(i, y);
+                        a.setX(i, a.getX(i) + Math.sin(now * 0.0006 + i) * dt * 0.05);
+                    }
+                    a.needsUpdate = true;
+                }
+            }
+            applySize(false);
+            const pk = q.post && POST && !postFailed ? [q.ao, q.bloom, q.grade, q.antialias, size[0], size[1], pixelRatio].join('|') : 'none';
+            if (pk !== postKey) { postKey = pk; buildPost(); }
+            if (composer) {
+                try { composer.render(dt); return; } catch (e) { postFailed = true; disposeComposer(); if (infoListener) infoListener(); }
+            }
             renderer.render(scene, camera);
         }
 
@@ -689,7 +1065,17 @@
             return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
         }
 
-        return { buildBoard, syncVehicles, flashInvalid, highlightHint, applyQuality, applyTheme, resetCamera, resize, frame, pickVehicle, pickMarker, pickCell, celebrate, screenPos, select: updateSelectionVisual };
+        /** What the Graphics panel shows: GPU, auto choice, resolved tiers, pixels, post status. */
+        function graphicsInfo() {
+            let px = [Math.round(size[0] * pixelRatio), Math.round(size[1] * pixelRatio)];
+            if (!px[0]) { const r = targetRatio(); px = [Math.round(window.innerWidth * r), Math.round(window.innerHeight * r)]; }
+            return { gpu, detected, resolved: q, pixels: px, postFailed: postFailed || (postLoadFailed && q.post), fps: Math.round(fps) };
+        }
+        function onInfo(fn) { infoListener = fn; }
+
+        setGraphics(settings.graphics);
+
+        return { buildBoard, syncVehicles, flashInvalid, highlightHint, applyQuality, setGraphics, graphicsInfo, onInfo, applyTheme, resetCamera, resize, frame, pickVehicle, pickMarker, pickCell, celebrate, screenPos, select: updateSelectionVisual };
     })();
 
     // ================= UI =================
@@ -895,6 +1281,7 @@
     function openOverlay(id) {
         lastFocus = document.activeElement;
         $(id).classList.add('active');
+        if (id === 'overlay-settings') syncGraphicsUi();
         const first = $(id).querySelector('button, input, select');
         if (first) first.focus();
     }
@@ -1221,7 +1608,85 @@
         });
     }
     $('opt-mute').addEventListener('change', e => { settings.muted = e.target.checked; A.setMuted(settings.muted); saveSettings(); });
-    $('opt-quality').addEventListener('change', e => { settings.quality = e.target.value; render.applyQuality(); saveSettings(); });
+
+    // ================= Graphics settings panel =================
+    const GFX_S = G.strings(G.pickLocale(navigator.language));
+    const tierName = t => GFX_S.tiers[t] || t;
+    function applyGraphics() {
+        render.setGraphics(settings.graphics);
+        syncGraphicsUi();
+        saveSettings();
+    }
+    function buildGraphicsPanel() {
+        $('gfx-h').textContent = GFX_S.graphics;
+        $('gfx-l-preset').textContent = GFX_S.quality;
+        $('gfx-l-scale').textContent = GFX_S.renderScale;
+        $('gfx-l-adaptive').textContent = GFX_S.adaptive;
+        $('gfx-l-fps').textContent = GFX_S.showFps;
+        $('gfx-note').textContent = GFX_S.postFailed;
+        const presetSel = $('gfx-preset');
+        for (const p of ['auto'].concat(G.PRESETS)) {
+            const o = document.createElement('option');
+            o.value = p; o.textContent = p === 'auto' ? GFX_S.auto : tierName(p);
+            presetSel.appendChild(o);
+        }
+        presetSel.addEventListener('change', () => {
+            settings.graphics = G.withPreset(settings.graphics, presetSel.value); // a preset clears overrides
+            applyGraphics();
+        });
+        const cats = $('gfx-cats');
+        for (const [cat, tiers] of Object.entries(G.CATEGORIES)) {
+            const lab = document.createElement('label');
+            const span = document.createElement('span');
+            span.textContent = GFX_S.cats[cat];
+            const sel = document.createElement('select');
+            sel.id = 'gfx-' + cat;
+            sel.dataset.gfxCat = cat;
+            for (const t of ['preset'].concat(tiers)) {
+                const o = document.createElement('option');
+                o.value = t; o.textContent = t === 'preset' ? GFX_S.fromPreset : tierName(t);
+                sel.appendChild(o);
+            }
+            sel.addEventListener('change', () => {
+                if (sel.value === 'preset') delete settings.graphics[cat];
+                else settings.graphics[cat] = sel.value;
+                applyGraphics();
+            });
+            lab.append(span, sel);
+            cats.appendChild(lab);
+        }
+        const scale = $('gfx-scale');
+        scale.addEventListener('input', () => { $('gfx-scale-val').textContent = scale.value + '%'; });
+        scale.addEventListener('change', () => { settings.graphics.render_scale = scale.value / 100; applyGraphics(); });
+        $('gfx-adaptive').addEventListener('change', e => { settings.graphics.adaptive = e.target.checked; applyGraphics(); });
+        $('gfx-fps').addEventListener('change', e => { settings.graphics.show_fps = e.target.checked; applyGraphics(); });
+        render.onInfo(syncGraphicsUi);
+    }
+    function syncGraphicsUi() {
+        const info = render.graphicsInfo();
+        const g = settings.graphics;
+        const r = info ? info.resolved : G.resolve(g, 'low');
+        const presetSel = $('gfx-preset');
+        presetSel.options[0].textContent = GFX_S.auto.replace('{tier}', tierName(info ? info.detected : 'low'));
+        presetSel.value = G.PRESETS.includes(g.preset) ? g.preset : 'auto';
+        for (const [cat, tiers] of Object.entries(G.CATEGORIES)) {
+            const sel = $('gfx-' + cat);
+            sel.options[0].textContent = GFX_S.fromPreset.replace('{tier}', tierName(G.presetTier(r.preset, cat)));
+            sel.value = tiers.includes(g[cat]) ? g[cat] : 'preset';
+        }
+        const pct = Math.round((Number(g.render_scale) || 1) * 100);
+        $('gfx-scale').value = pct;
+        $('gfx-scale-val').textContent = pct + '%';
+        $('gfx-adaptive').checked = g.adaptive !== false;
+        $('gfx-fps').checked = !!g.show_fps;
+        $('gfx-summary').textContent = info
+            ? [info.gpu || GFX_S.gpuUnknown, G.describe(r, info.pixels, GFX_S)].join(' · ')
+            : GFX_S.postFailed;
+        $('gfx-note').hidden = !(info && info.postFailed);
+        $('gfx-section').dataset.gfxPreset = r.preset;
+    }
+    buildGraphicsPanel();
+    syncGraphicsUi();
     const themeSel = $('opt-theme');
     C.THEMES.forEach(t => { const o = document.createElement('option'); o.value = t.id; o.textContent = t.name; themeSel.appendChild(o); });
     themeSel.addEventListener('change', e => { settings.theme = e.target.value; render.applyTheme(); saveSettings(); });

@@ -26,6 +26,15 @@ button { font:inherit; color:inherit; }
   padding: calc(12px + var(--sat)) calc(14px + var(--sar)) calc(14px + var(--sab)) calc(14px + var(--sal)); }
 .screen.active { display:flex; }
 
+/* title backdrop: dusk sky over a rooftop skyline (decorative, behind the menu) */
+#screen-title { background:
+  radial-gradient(ellipse 70% 45% at 50% 108%, rgba(232,106,60,.28), transparent 70%),
+  linear-gradient(180deg, #0b1220 0%, #121c33 55%, #1d2342 100%); }
+#screen-title::before { content:""; position:absolute; left:0; right:0; bottom:0; height:min(34vh,260px); pointer-events:none;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 100' preserveAspectRatio='none'%3E%3Cpath fill='%23070c17' d='M0 100V62h14V48h10v14h8V30h18v32h6V54h12V40h8v-8h6v8h6v22h10V44h16v18h6V24h4v-6h2v6h4v38h8V50h14v12h10V36h20v26h6V46h12v16h8V28h6v-8h4v8h6v34h10V52h12v10h8V40h18v22h6V56h10v6h8V34h14v28h8V46h12v16h6V30h16v32h10V50h12v12h6V58H400v42z'/%3E%3C/svg%3E") bottom/100% 100% no-repeat;
+  opacity:.9; }
+#screen-title .center-col { position:relative; z-index:1; }
+h1.brand { text-shadow:0 2px 0 rgba(0,0,0,.35), 0 0 28px rgba(232,106,60,.35); }
 h1.brand { font-size:clamp(30px,6vw,52px); font-weight:800; letter-spacing:.06em; text-align:center; }
 .tagline { color:var(--dim); text-align:center; max-width:70ch; margin:6px auto 0; }
 .center-col { display:flex; flex-direction:column; align-items:center; gap:14px; margin:auto; width:min(94vw,640px); }
@@ -122,6 +131,17 @@ body.reduced-motion * { transition:none !important; animation:none !important; }
 .vehicle-list button { display:block; width:100%; text-align:left; margin:4px 0; padding:8px 10px;
   background:var(--panel2); border:none; border-radius:8px; cursor:pointer; }
 .vehicle-list button[aria-pressed=true] { box-shadow:inset 0 0 0 2px var(--accent); }
+/* graphics settings */
+.dialog select { min-height:44px; max-width:58%; min-width:0; }
+.dialog label > span:first-child { min-width:0; }
+.gfx-range { display:flex; align-items:center; gap:8px; flex:1; max-width:240px; min-width:0; white-space:nowrap; }
+.dialog .gfx-range input[type=range] { flex:1; min-width:0; min-height:44px; }
+.gfx-range output { min-width:3.2em; text-align:right; font-variant-numeric:tabular-nums; }
+.gfx-summary { color:var(--dim); font-size:.85em; margin-top:6px; overflow-wrap:anywhere; }
+.gfx-note { color:var(--focus); font-size:.85em; margin-top:4px; }
+#fps-meter { position:absolute; left:8px; bottom:8px; z-index:7; pointer-events:none; font:600 12px/1.4 ui-monospace,monospace;
+  background:rgba(0,0,0,.6); color:#fff; padding:2px 8px; border-radius:6px; }
+#fps-meter[hidden] { display:none; }
 #compat-message { display:none; padding:20px; text-align:center; color:var(--danger); font-weight:700; }
 </style>
 </head>
@@ -273,14 +293,18 @@ body.reduced-motion * { transition:none !important; animation:none !important; }
         <label>Voice cues <input type="range" id="vol-voice" min="0" max="100" value="70"></label>
         <label>Mute all <input type="checkbox" id="opt-mute"></label>
       </section>
-      <section aria-label="Graphics">
-        <h3>Graphics</h3>
-        <label>Quality tier
-          <select id="opt-quality" style="min-height:44px;">
-            <option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option>
-          </select>
-        </label>
+      <section aria-labelledby="gfx-h" id="gfx-section">
+        <h3 id="gfx-h">Graphics</h3>
         <label>Theme <select id="opt-theme" style="min-height:44px;"></select></label>
+        <label><span id="gfx-l-preset">Quality</span> <select id="gfx-preset" data-gfx="preset"></select></label>
+        <label><span id="gfx-l-scale">Render scale</span>
+          <span class="gfx-range"><input type="range" id="gfx-scale" data-gfx="render_scale" min="50" max="200" step="10" value="100"><output id="gfx-scale-val" for="gfx-scale">100%</output></span>
+        </label>
+        <div id="gfx-cats"></div>
+        <label><span id="gfx-l-adaptive">Adaptive resolution</span> <input type="checkbox" id="gfx-adaptive" data-gfx="adaptive" checked></label>
+        <label><span id="gfx-l-fps">Show frame rate</span> <input type="checkbox" id="gfx-fps" data-gfx="show_fps"></label>
+        <p id="gfx-summary" class="gfx-summary"></p>
+        <p id="gfx-note" class="gfx-note" role="status" hidden></p>
       </section>
       <section aria-label="Accessibility">
         <h3>Accessibility</h3>
@@ -325,14 +349,18 @@ body.reduced-motion * { transition:none !important; animation:none !important; }
   <div id="compat-message" role="alert"></div>
 </div>
 
+<script type="importmap">
+  { "imports": { "three": "/three.module.min.js", "three/addons/": "/vendor/three/addons/" } }
+</script>
 <script type="module">
-  import * as THREE from '/three.module.min.js';
+  import * as THREE from 'three';
   window.THREE = THREE;
 </script>
 <script type="module" src="/rules.js"></script>
 <script type="module" src="/content.js"></script>
 <script type="module" src="/audio.js"></script>
 <script type="module" src="/platform.js"></script>
+<script type="module" src="/gfx.js"></script>
 <script type="module" src="/main.js"></script>
 </body>
 </html>

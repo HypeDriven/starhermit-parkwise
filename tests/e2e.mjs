@@ -89,6 +89,34 @@ async function playthrough(page, pass) {
     await page.waitForFunction(() => !document.getElementById('overlay-settings').classList.contains('active'));
   });
 
+  await step('graphics: preset + override apply live and survive reload', async () => {
+    await page.click('#btn-settings');
+    await page.waitForSelector('#overlay-settings.active');
+    await page.locator('#gfx-preset').scrollIntoViewIfNeeded();
+    const autoLabel = await page.locator('#gfx-preset option[value=auto]').textContent();
+    if (!/Auto \(detected: (Low|Balanced|High|Ultra)\)/.test(autoLabel)) throw new Error('auto label: ' + autoLabel);
+    await page.selectOption('#gfx-preset', 'low');
+    await page.waitForFunction(() => document.body.dataset.gfxPreset === 'low');
+    if (!/no shadows/.test(await page.textContent('#gfx-summary'))) throw new Error('low summary: ' + await page.textContent('#gfx-summary'));
+    await page.selectOption('#gfx-preset', 'high');
+    await page.waitForFunction(() => document.body.dataset.gfxPreset === 'high');
+    await page.selectOption('#gfx-bloom', 'off');
+    const sum = await page.textContent('#gfx-summary');
+    if (!/2048² shadows/.test(sum) || /bloom/.test(sum)) throw new Error('high/no-bloom summary: ' + sum);
+    await page.screenshot({ path: SHOT('graphics', pass) });
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => window.PARKWISE && window.PARKWISE.appState === 'title');
+    if (await page.evaluate(() => document.body.dataset.gfxPreset) !== 'high') throw new Error('preset not persisted');
+    await page.click('#btn-settings');
+    await page.waitForSelector('#overlay-settings.active');
+    if (await page.inputValue('#gfx-bloom') !== 'off') throw new Error('override not persisted');
+    // choosing a preset clears overrides
+    await page.selectOption('#gfx-preset', 'auto');
+    if (await page.inputValue('#gfx-bloom') !== 'preset') throw new Error('preset did not clear overrides');
+    await page.click('#btn-settings-close');
+    await page.waitForFunction(() => !document.getElementById('overlay-settings').classList.contains('active'));
+  });
+
   await step('help open/close', async () => {
     await page.click('#btn-help');
     await page.waitForSelector('#overlay-help.active');
@@ -116,11 +144,22 @@ async function playthrough(page, pass) {
     await page.screenshot({ path: SHOT('play', pass) });
   });
 
-  await step('pause → resume', async () => {
+  await step('pause → resume (Ultra then Low rendered from the pause Settings)', async () => {
     await page.click('#btn-pause');
     await page.waitForSelector('#overlay-pause.active');
     await page.waitForFunction(() => window.PARKWISE.appState === 'paused');
     await page.screenshot({ path: SHOT('pause', pass) });
+    await page.click('#btn-pause-settings');
+    await page.waitForSelector('#overlay-settings.active');
+    await page.selectOption('#gfx-preset', 'ultra');
+    await page.check('#gfx-fps');
+    await page.waitForTimeout(1500); // render a few Ultra frames behind the dialog
+    if (await page.evaluate(() => document.getElementById('game-canvas').dataset.gfxPreset) !== 'ultra') throw new Error('ultra not applied to canvas');
+    if (!(await page.locator('#fps-meter').isVisible())) throw new Error('fps meter not shown');
+    await page.selectOption('#gfx-preset', 'low');
+    await page.uncheck('#gfx-fps');
+    await page.waitForTimeout(300);
+    await page.click('#btn-settings-close');
     await page.click('#btn-resume');
     await page.waitForFunction(() => window.PARKWISE.appState === 'active');
   });
@@ -229,7 +268,7 @@ let browser = null;
 try {
   browser = await chromium.launch({
     executablePath: '/usr/bin/google-chrome',
-    args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
+    args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
   });
 
   const passes = [
@@ -242,7 +281,7 @@ try {
     const page = await context.newPage();
     page.on('pageerror', (e) => errors.push(`[${p.name}] pageerror: ${e.message}`));
     page.on('console', (m) => {
-      if (m.type() === 'error' && !browserNoise.test(m.text())) errors.push(`[${p.name}] console: ${m.text()}`);
+      if ((m.type() === 'error' || m.type() === 'warning') && !browserNoise.test(m.text())) errors.push(`[${p.name}] console: ${m.text()}`);
     });
     await playthrough(page, p.name);
     await context.close();
