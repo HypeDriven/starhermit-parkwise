@@ -35,6 +35,9 @@ button { font:inherit; color:inherit; }
   opacity:.9; }
 #screen-title .center-col { position:relative; z-index:1; }
 h1.brand { text-shadow:0 2px 0 rgba(0,0,0,.35), 0 0 28px rgba(232,106,60,.35); }
+#profile-line .avatar { width:20px; height:20px; border-radius:50%; vertical-align:middle; margin-right:6px; object-fit:cover; }
+#sh-toast { position:fixed; left:50%; bottom:max(16px, env(safe-area-inset-bottom)); transform:translateX(-50%); z-index:200; max-width:min(90vw,420px); padding:10px 16px; border-radius:12px; background:var(--panel2); color:var(--ink); border:1px solid var(--accent); text-align:center; }
+#sh-toast[hidden] { display:none; }
 h1.brand { font-size:clamp(30px,6vw,52px); font-weight:800; letter-spacing:.06em; text-align:center; }
 .tagline { color:var(--dim); text-align:center; max-width:70ch; margin:6px auto 0; }
 .center-col { display:flex; flex-direction:column; align-items:center; gap:14px; margin:auto; width:min(94vw,640px); }
@@ -162,6 +165,10 @@ body.reduced-motion * { transition:none !important; animation:none !important; }
       <div class="btn-row">
         <button class="btn ghost" id="btn-settings">Settings</button>
         <button class="btn ghost" id="btn-help">How to play</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn ghost" id="btn-sh-signin" style="display:none">Sign in with StarHermit</button>
+        <button class="btn ghost" id="btn-sh-invite" style="display:none">Invite a friend</button>
       </div>
       <p class="tagline" id="profile-line">Guest profile — progress is saved on this device.</p>
     </div>
@@ -334,7 +341,7 @@ body.reduced-motion * { transition:none !important; animation:none !important; }
         <ul style="padding-left:20px; color:var(--dim);">
           <li>Pointer/touch: tap a vehicle to select, then drag along its axis, or tap a glowing target marker.</li>
           <li>Keyboard: Tab into the board, then Tab cycles vehicles and arrow keys slide the selected one. Shift+Tab leaves the board for the buttons.</li>
-          <li>U undo, H hint, R restart, C reset camera, Esc pause.</li>
+          <li id="help-keys">← → ↑ ↓ slide, U undo, H hint, R restart, C reset camera, P/Esc pause.</li>
           <li>Gamepad: D-pad/left stick navigate, A confirm, B cancel, Start pause.</li>
         </ul>
       </section>
@@ -348,6 +355,7 @@ body.reduced-motion * { transition:none !important; animation:none !important; }
 
   <div id="sr-announcer" aria-live="polite"></div>
   <div id="compat-message" role="alert"></div>
+  <div id="sh-toast" role="status" hidden></div>
 </div>
 
 <script type="importmap">
@@ -357,6 +365,7 @@ body.reduced-motion * { transition:none !important; animation:none !important; }
   import * as THREE from 'three';
   window.THREE = THREE;
 </script>
+<script src="/starhermit-sdk.js"></script>
 <script type="module" src="/rules.js"></script>
 <script type="module" src="/content.js"></script>
 <script type="module" src="/audio.js"></script>

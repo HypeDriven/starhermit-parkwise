@@ -68,16 +68,65 @@
         A.playSfx('win');
         saveProgress();
     }
-    function saveSettings() { saveJson(SETTINGS_KEY, settings); platformCloudDirty(); }
+    function saveSettings() { saveJson(SETTINGS_KEY, settings); platformCloudDirty(); pushPlatformSettings(); }
     function saveProgress() { saveJson(PROGRESS_KEY, progress); platformCloudDirty(); }
 
     // ================= StarHermit platform (hosted mode) =================
     // window.PARKWISE_PLATFORM reads the launch token at load; hosted is true
     // only when a token was actually read. Local/offline play never calls the API.
     const PF = window.PARKWISE_PLATFORM;
-    const platform = { hosted: !!(PF && PF.hosted), nickname: null, sync: 'local' };
+    const platform = { hosted: !!(PF && PF.hosted), nickname: null, avatar: null, sync: 'local' };
+    // the platform has no time or score routes: those dev-server calls stay off *.starhermit.com
+    const onPlatformHost = /(^|\.)starhermit\.com$/.test(location.hostname);
 
     function platformCloudDirty() { if (PF) PF.cloudDirty(); }
+
+    // Player preferences mirrored to the StarHermit settings KV (the account value wins at boot).
+    const KV_KEYS = ['volumes', 'muted', 'theme', 'graphics', 'reducedMotion', 'highContrast', 'largeText', 'captions', 'holdDrag', 'lefty'];
+    let kvSig = null;
+    function kvSnapshot() { return Object.fromEntries(KV_KEYS.map(k => [k, settings[k] === undefined ? null : settings[k]])); }
+    function pushPlatformSettings() {
+        if (!platform.hosted) return;
+        const o = kvSnapshot(), sig = JSON.stringify(o);
+        if (sig === kvSig) return;
+        kvSig = sig;
+        PF.patchSettings(o);
+    }
+
+    // Keyboard actions by KeyboardEvent.code, mirrored as control.* lines in
+    // starhermit.txt; the player's StarHermit rebinds replace these at boot.
+    const KEY_DEFAULTS = {
+        left: ['ArrowLeft'], right: ['ArrowRight'], up: ['ArrowUp'], down: ['ArrowDown'],
+        undo: ['KeyU'], hint: ['KeyH'], restart: ['KeyR'], camera: ['KeyC'], pause: ['KeyP'], menu: ['Escape'],
+    };
+    let keys = JSON.parse(JSON.stringify(KEY_DEFAULTS));
+    const keyAction = code => Object.keys(keys).find(a => keys[a].includes(code)) || null;
+    function keyLabel(code) {
+        const named = { Escape: 'Esc', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', Space: 'Space' };
+        return named[code] || String(code || '').replace(/^Key/, '').replace(/^Digit/, '');
+    }
+    // How to play → Controls lists the effective keys.
+    function renderKeyHelp() {
+        const el = $('help-keys');
+        if (!el) return;
+        const k = a => keys[a].map(keyLabel).join('/');
+        el.textContent = [k('left'), k('right'), k('up'), k('down')].join(' ') + ' slide, ' + k('undo') + ' undo, ' + k('hint') + ' hint, ' +
+            k('restart') + ' restart, ' + k('camera') + ' reset camera, ' + k('pause') + '/' + k('menu') + ' pause.';
+    }
+
+    // Title account buttons: sign-in only where the platform offers it, invite only when signed in.
+    function refreshAccount() {
+        $('btn-sh-signin').style.display = PF && PF.canSignIn() ? '' : 'none';
+        $('btn-sh-invite').style.display = PF && PF.inviteLink() ? '' : 'none';
+    }
+    let toastTimer = null;
+    function toast(msg) {
+        const el = $('sh-toast');
+        el.textContent = msg;
+        el.hidden = false;
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => { el.hidden = true; }, 3200);
+    }
 
     function boardKey(mode, entry) { return mode + ':' + (entry.day || entry.seed); }
 
@@ -93,6 +142,11 @@
             offline: 'offline — changes stay on this device',
         }[platform.sync] || 'progress follows this account';
         el.textContent = (platform.nickname || 'Player') + ' — ' + syncText;
+        if (platform.avatar) {
+            const img = document.createElement('img');
+            img.className = 'avatar'; img.src = platform.avatar; img.alt = ''; img.width = 20; img.height = 20;
+            el.prepend(img);
+        }
     }
 
     // Remote snapshot wins conflicts; localStorage stays the offline cache.
@@ -117,6 +171,15 @@
     }
 
     async function initPlatform() {
+        if (PF) {
+            keys = await PF.loadBindings(KEY_DEFAULTS);
+            PF.onAuth(a => {
+                platform.hosted = a.signedIn;
+                if (!a.signedIn) { platform.avatar = null; toast(GFX_S.sh.signedOut); }
+                renderProfileLine();
+                refreshAccount();
+            });
+        }
         if (!platform.hosted) return;
         platform.nickname = PF.fallbackName(PF.sub);
         PF.onStatus(s => { platform.sync = s; renderProfileLine(); });
@@ -126,7 +189,16 @@
             if (remote) applyRemoteDoc(remote); // remote-preferred load
             else PF.cloudDirty(); // no remote save yet: mirror the local cache up once
         } catch (e) { /* offline start: the local cache stays authoritative */ }
+        // the account's preferences (settings KV) win over the local copy
+        try {
+            const kv = await PF.getSettings();
+            const picked = {};
+            for (const k of KV_KEYS) if (kv && kv[k] !== undefined && kv[k] !== null) picked[k] = kv[k];
+            if (Object.keys(picked).length) applyRemoteDoc({ settings: Object.assign({}, settings, picked) });
+            kvSig = JSON.stringify(kvSnapshot());
+        } catch (e) { /* settings KV unreachable: local settings stay */ }
         PF.myDisplayName().then(n => { platform.nickname = n; renderProfileLine(); });
+        PF.avatarUrl().then(u => { if (u) { platform.avatar = u; renderProfileLine(); } });
         renderProfileLine();
     }
 
@@ -1262,7 +1334,7 @@
     function startDaily() {
         const finish = day => beginRound('daily', C.dailyLevel(day), 'Daily challenge for ' + day + '.');
         // hosted: the platform exposes no time route, so key the day from the local UTC clock
-        if (platform.hosted) return finish(todayKey());
+        if (platform.hosted || onPlatformHost) return finish(todayKey());
         // local dev: synchronize to the game server's clock with round-trip adjustment
         const t0 = Date.now();
         fetch('/api/v1/time').then(r => r.json()).then(j => {
@@ -1308,7 +1380,8 @@
         $('results-progress').textContent = won
             ? 'Career wins: ' + progress.wins + ' · Journey stage ' + (progress.journeyUnlocked + 1) + ' unlocked'
             : 'Retry to keep your streak alive.';
-        const ranked = ['journey', 'daily', 'score'].includes(session.mode) && won;
+        // clients never submit platform scores: the validated submit exists only on the dev server
+        const ranked = ['journey', 'daily', 'score'].includes(session.mode) && won && !onPlatformHost;
         $('submit-row').style.display = ranked ? '' : 'none';
         if (ranked) {
             // hosted play submits under the account nickname; the free-text name
@@ -1358,9 +1431,8 @@
     async function refreshHostedLeaderboard() {
         const t = $('leaderboard-table');
         try {
-            const info = await PF.gameInfo();
-            if (info && info.leaderboardId) {
-                const rows = await PF.leaderboardEntries(info.leaderboardId, { pageSize: 10 });
+            const rows = await PF.leaderboardRows(10);
+            if (rows) {
                 if (!rows.length) { t.innerHTML = '<tr><td>No entries yet — be the first.</td></tr>'; return; }
                 t.innerHTML = '<tr><th>Rank</th><th>Name</th><th>Score</th></tr>';
                 for (const e of rows) {
@@ -1401,7 +1473,6 @@
         };
         $('submit-status').textContent = 'Validating…';
         const headers = { 'content-type': 'application/json' };
-        if (platform.hosted) headers.authorization = 'Bearer ' + PF.token; // its-backend: script server validates
         fetch('/api/v1/scores', { method: 'POST', headers, body: JSON.stringify(body) })
             .then(async r => {
                 const j = await r.json().catch(() => ({}));
@@ -1460,7 +1531,8 @@
     // ================= input: keyboard =================
     document.addEventListener('keydown', e => {
         if (e.target && ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
-        if (e.key === 'Escape') {
+        const act = keyAction(e.code);
+        if (act === 'menu') {
             if ($('overlay-settings').classList.contains('active')) return closeOverlay('overlay-settings');
             if ($('overlay-help').classList.contains('active')) return closeOverlay('overlay-help');
             if (appState === 'active') return pauseGame();
@@ -1468,8 +1540,7 @@
             return;
         }
         if (appState !== 'active' || !session || session.over) return;
-        const k = e.key;
-        if (k === 'Tab') {
+        if (e.key === 'Tab') {
             // Only the board itself traps Tab (to cycle vehicles); Shift+Tab and Tab
             // from anywhere else keep the normal focus order so the HUD controls
             // stay reachable by keyboard.
@@ -1477,17 +1548,17 @@
             e.preventDefault();
             const n = session.state.vehicles.length;
             selectVehicle((session.selected + 1) % n);
-        } else if (k.startsWith('Arrow')) {
+        } else if (['left', 'right', 'up', 'down'].includes(act)) {
             e.preventDefault();
             const v = session.state.vehicles[session.selected];
-            const map = v.ori === 'h' ? { ArrowLeft: -1, ArrowRight: 1 } : { ArrowUp: -1, ArrowDown: 1 };
-            if (map[k] !== undefined) executeMove(session.selected, map[k], 1, 'k' + (++cmdCounter));
+            const map = v.ori === 'h' ? { left: -1, right: 1 } : { up: -1, down: 1 };
+            if (map[act] !== undefined) executeMove(session.selected, map[act], 1, 'k' + (++cmdCounter));
             else { A.playSfx('invalid'); announce('That vehicle only moves ' + (v.ori === 'h' ? 'left and right' : 'up and down') + '.'); }
-        } else if (k === 'u' || k === 'U') undoMove();
-        else if (k === 'h' || k === 'H') requestHint();
-        else if (k === 'r' || k === 'R') restartRound();
-        else if (k === 'c' || k === 'C') render.resetCamera();
-        else if (k === 'p' || k === 'P') pauseGame();
+        } else if (act === 'undo') undoMove();
+        else if (act === 'hint') requestHint();
+        else if (act === 'restart') restartRound();
+        else if (act === 'camera') render.resetCamera();
+        else if (act === 'pause') pauseGame();
     });
 
     // ================= input: gamepad =================
@@ -1550,7 +1621,20 @@
     on('btn-daily', () => startDaily());
     on('btn-journey-resume', () => startJourney(progress.journeyUnlocked));
     on('btn-settings', () => openOverlay('overlay-settings'));
-    on('btn-help', () => openOverlay('overlay-help'));
+    on('btn-help', () => { renderKeyHelp(); openOverlay('overlay-help'); });
+    on('btn-sh-signin', () => PF.signIn());
+    on('btn-sh-invite', async () => {
+        const link = PF.inviteLink();
+        if (!link) return;
+        try { await navigator.clipboard.writeText(link); toast(SH_S.copied); }
+        catch (e) { toast(SH_S.copyFailed); }
+    });
+    const SH_S = G.strings(G.pickLocale(navigator.language)).sh;
+    for (const [id, key] of [['btn-sh-signin', 'signIn'], ['btn-sh-invite', 'invite']]) {
+        $(id).textContent = SH_S[key];
+        $(id).lang = G.pickLocale(navigator.language);
+    }
+    refreshAccount();
     on('btn-modes-back', () => setAppState('title'));
     on('btn-setup-back', () => setAppState('mode-select'));
     on('btn-pause', () => pauseGame());
