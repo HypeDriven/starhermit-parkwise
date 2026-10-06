@@ -166,7 +166,7 @@ The Settings panel's **Graphics** section (reachable from the title and the paus
 - `rules`: pure deterministic state transitions, legality, scoring, seeded random stream.
 - `session`: local or hosted commands, snapshots, prediction policy, reconnect, replay.
 - `render`: Three.js scene graph, semantic entity views, camera, lighting, VFX, quality.
-- `ui`: responsive DOM shell, focus, localization, settings, overlays, accessibility mirror.
+- `ui`: responsive DOM shell, focus, localization, settings, overlays, accessibility mirror. Overlays open at their top (heading visible): focus moves in with `preventScroll`.
 - `audio`: buses, event mapping, focus/background behavior, decode and memory policy.
 - `content`: versioned levels, themes, tutorials, validation metadata.
 - `gfx` (`gfx.js`): pure quality model — presets, categories, GPU detection, `resolve()`, `describe()`, Graphics panel strings; unit-tested in `tests/gfx.test.js`.

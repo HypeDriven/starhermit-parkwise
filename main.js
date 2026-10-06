@@ -1355,7 +1355,10 @@
         $(id).classList.add('active');
         if (id === 'overlay-settings') syncGraphicsUi();
         const first = $(id).querySelector('button, input, select');
-        if (first) first.focus();
+        // preventScroll + reset: a low first control must not scroll the
+        // heading away; overlays always open at their top.
+        if (first) first.focus({ preventScroll: true });
+        for (const n of [$(id), ...$(id).querySelectorAll('*')]) if (n.scrollTop) n.scrollTop = 0;
     }
     function closeOverlay(id) {
         $(id).classList.remove('active');
