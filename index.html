@@ -30,17 +30,17 @@ button { font:inherit; color:inherit; }
 #screen-title { background:
   radial-gradient(ellipse 70% 45% at 50% 108%, rgba(232,106,60,.28), transparent 70%),
   linear-gradient(180deg, #0b1220 0%, #121c33 55%, #1d2342 100%); }
-#screen-title::before { content:""; position:absolute; left:0; right:0; bottom:0; height:min(34vh,260px); pointer-events:none;
+#screen-title::before { content:""; position:absolute; left:0; right:0; bottom:0; height:min(calc(34vh / var(--ui-scale, 1)),260px); pointer-events:none;
   background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 100' preserveAspectRatio='none'%3E%3Cpath fill='%23070c17' d='M0 100V62h14V48h10v14h8V30h18v32h6V54h12V40h8v-8h6v8h6v22h10V44h16v18h6V24h4v-6h2v6h4v38h8V50h14v12h10V36h20v26h6V46h12v16h8V28h6v-8h4v8h6v34h10V52h12v10h8V40h18v22h6V56h10v6h8V34h14v28h8V46h12v16h6V30h16v32h10V50h12v12h6V58H400v42z'/%3E%3C/svg%3E") bottom/100% 100% no-repeat;
   opacity:.9; }
 #screen-title .center-col { position:relative; z-index:1; }
 h1.brand { text-shadow:0 2px 0 rgba(0,0,0,.35), 0 0 28px rgba(232,106,60,.35); }
 #profile-line .avatar { width:20px; height:20px; border-radius:50%; vertical-align:middle; margin-right:6px; object-fit:cover; }
-#sh-toast { position:fixed; left:50%; bottom:max(16px, env(safe-area-inset-bottom)); transform:translateX(-50%); z-index:200; max-width:min(90vw,420px); padding:10px 16px; border-radius:12px; background:var(--panel2); color:var(--ink); border:1px solid var(--accent); text-align:center; }
+#sh-toast { position:fixed; left:50%; bottom:max(16px, env(safe-area-inset-bottom)); transform:translateX(-50%); z-index:200; max-width:min(calc(90vw / var(--ui-scale, 1)),420px); padding:10px 16px; border-radius:12px; background:var(--panel2); color:var(--ink); border:1px solid var(--accent); text-align:center; }
 #sh-toast[hidden] { display:none; }
-h1.brand { font-size:clamp(30px,6vw,52px); font-weight:800; letter-spacing:.06em; text-align:center; }
+h1.brand { font-size:clamp(30px,calc(6vw / var(--ui-scale, 1)),52px); font-weight:800; letter-spacing:.06em; text-align:center; }
 .tagline { color:var(--dim); text-align:center; max-width:70ch; margin:6px auto 0; }
-.center-col { display:flex; flex-direction:column; align-items:center; gap:14px; margin:auto; width:min(94vw,640px); }
+.center-col { display:flex; flex-direction:column; align-items:center; gap:14px; margin:auto; width:min(calc(94vw / var(--ui-scale, 1)),640px); }
 
 .btn { cursor:pointer; border:none; border-radius:12px; padding:12px 24px; font-weight:700;
   min-height:44px; min-width:44px; background:var(--panel2); color:var(--ink);
@@ -85,7 +85,7 @@ h1.brand { font-size:clamp(30px,6vw,52px); font-weight:800; letter-spacing:.06em
 /* compact: rails collapse into drawers */
 @media (max-width:1023px) {
   #game-shell { grid-template-columns:1fr; grid-template-areas:"status" "field" "tray"; }
-  #rail-left, #rail-right { position:fixed; top:0; bottom:0; width:min(84vw,320px); background:var(--panel);
+  #rail-left, #rail-right { position:fixed; top:0; bottom:0; width:min(calc(84vw / var(--ui-scale, 1)),320px); background:var(--panel);
     z-index:40; transition:transform .2s ease; padding-top:calc(10px + var(--sat)); }
   #rail-left { left:0; transform:translateX(-105%); }
   #rail-right { right:0; transform:translateX(105%); }
@@ -111,8 +111,8 @@ h1.brand { font-size:clamp(30px,6vw,52px); font-weight:800; letter-spacing:.06em
 .overlay { position:fixed; inset:0; display:none; align-items:center; justify-content:center;
   background:rgba(4,8,16,.7); z-index:60; padding:16px; }
 .overlay.active { display:flex; }
-.dialog { background:var(--panel); border-radius:16px; padding:22px; width:min(94vw,560px);
-  max-height:calc(100vh - 32px); overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,.6); }
+.dialog { background:var(--panel); border-radius:16px; padding:22px; width:min(calc(94vw / var(--ui-scale, 1)),560px);
+  max-height:calc(calc(100vh / var(--ui-scale, 1)) - 32px); overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,.6); }
 .dialog h2 { margin-bottom:10px; }
 .dialog section { margin-bottom:16px; }
 .dialog label { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:6px 0; }
@@ -146,7 +146,14 @@ body.reduced-motion * { transition:none !important; animation:none !important; }
   background:rgba(0,0,0,.6); color:#fff; padding:2px 8px; border-radius:6px; }
 #fps-meter[hidden] { display:none; }
 #compat-message { display:none; padding:20px; text-align:center; color:var(--danger); font-weight:700; }
+/* Large screens (ui-scale.js sets --ui-scale: 1 up to 1600x1000, then grows).
+   Menu screens, overlays and the game chrome (status bar, rails, tray) are
+   zoomed once each; the 3D canvas stays unzoomed and fills the field. */
+.screen:not(#screen-game), .overlay, #sh-toast, #status-bar, #rail-left, #rail-right, #tray,
+#caption-line, #fps-meter { zoom:var(--ui-scale, 1); }
+html.ui-scaled #game-shell { grid-template-columns: minmax(0, calc(220px * var(--ui-scale))) 1fr minmax(0, calc(220px * var(--ui-scale))); }
 </style>
+<script src="ui-scale.js"></script>
 <script src="browser-guard.js"></script>
 </head>
 <body>
