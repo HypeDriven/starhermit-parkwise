@@ -183,12 +183,16 @@
         if (!platform.hosted) return;
         platform.nickname = PF.fallbackName(PF.sub);
         PF.onStatus(s => { platform.sync = s; renderProfileLine(); });
-        PF.cloudStart(() => ({ savedAt: Date.now(), settings, progress }));
+        // The cloud mirror is armed only once the load settles: armed earlier,
+        // a pagehide/hidden flush or a save after the 5 s boot timeout would
+        // PUT the stale local cache over a newer cloud save mid-load.
+        const cloudDoc = () => ({ savedAt: Date.now(), settings, progress });
         try {
             const remote = await PF.cloudLoad();
+            PF.cloudStart(cloudDoc);
             if (remote) applyRemoteDoc(remote); // remote-preferred load
             else PF.cloudDirty(); // no remote save yet: mirror the local cache up once
-        } catch (e) { /* offline start: the local cache stays authoritative */ }
+        } catch (e) { PF.cloudStart(cloudDoc); /* offline start: the local cache stays authoritative */ }
         // the account's preferences (settings KV) win over the local copy
         try {
             const kv = await PF.getSettings();

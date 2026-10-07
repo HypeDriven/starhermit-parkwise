@@ -201,7 +201,7 @@ No module may mutate rules state except through a validated command. Rendering c
 ### Identity, preferences, and progress
 - **Sign-in:** on `*.starhermit.com` without a token the title shows **Sign in with StarHermit** (`StarHermit.signIn()`); hidden when signed in and when running locally.
 - **Identity:** the title profile line shows the avatar and profile nickname (fallback `Player ` + id prefix) with the sync state.
-- **Cloud save:** the settings+progress doc mirrors to the `game:<slug>` slot (remote preferred on load, 2 s debounce, pagehide flush, visible sync status); with no remote save the local doc is pushed once. localStorage remains the offline cache.
+- **Cloud save:** the settings+progress doc mirrors to the `game:<slug>` slot (remote preferred on load, 2 s debounce, pagehide flush, visible sync status); the mirror is armed only after that load settles, so nothing is pushed mid-load, and with no remote save the local doc is pushed once. localStorage remains the offline cache.
 - **Settings KV:** volumes, mute, theme, graphics, reduced motion, high contrast, large text, captions, hold-to-drag and left-handed layout are patched to the per-player settings store on change and applied at boot (the account value wins).
 - **Controls:** keyboard input routes by `KeyboardEvent.code` through `StarHermit.loadBindings()` (platform rebinds over the `control.*` defaults); How to play lists the effective keys. Tab cycling stays a fixed focus control.
 - **Invite:** signed in, the title shows **Invite a friend**, which copies `StarHermit.inviteLink()` to the clipboard and confirms with a toast.
