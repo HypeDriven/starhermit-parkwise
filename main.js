@@ -1400,10 +1400,26 @@
         }
         $('submit-status').textContent = '';
         $('leaderboard-table').innerHTML = '<tr><td>Loading…</td></tr>';
-        refreshLeaderboard();
+        const modeDef = MODES.find(m => m.id === session.mode);
+        if (won && modeDef && modeDef.ranked && platform.hosted && PF) postToLeaderboard(sc.total);
+        else { $('results-lb').hidden = true; refreshLeaderboard(); }
         const next = $('btn-next');
         next.style.display = won ? '' : 'none';
         openOverlay('overlay-results');
+    }
+
+    // Signed in only: a won ranked round posts its total through the platform
+    // (score-script.js), shows the player's rank and then reloads the board.
+    function postToLeaderboard(total) {
+        const line = $('results-lb'), s = session;
+        line.hidden = false;
+        line.textContent = GFX_S.sh.lbPosting;
+        PF.submitScore(total).then(r => {
+            if (session !== s) return;
+            line.textContent = !r.posted ? GFX_S.sh.lbNotPosted
+                : r.rank ? GFX_S.sh.lbRank.replace('{rank}', r.rank) : GFX_S.sh.lbPosted;
+            refreshLeaderboard();
+        });
     }
 
     function refreshLeaderboard() {

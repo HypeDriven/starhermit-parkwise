@@ -171,7 +171,7 @@ The Settings panel's **Graphics** section (reachable from the title and the paus
 - `content`: versioned levels, themes, tutorials, validation metadata.
 - `gfx` (`gfx.js`): pure quality model — presets, categories, GPU detection, `resolve()`, `describe()`, Graphics panel strings; unit-tested in `tests/gfx.test.js`.
 - `post` (`post.js`, lazily imported): EffectComposer chain (Render → GTAO → UnrealBloom → grade → Output → SMAA/FXAA) and the PMREM environment; three.js addons are vendored from the core's revision (r185) under `vendor/three/addons/` and mapped by the page's import map.
-- `platform` (`platform.js`): adapter over the shared StarHermit SDK (`starhermit-sdk.js`, `window.StarHermit`) — profile nickname/avatar, `game:<slug>` cloud-save mirror, settings KV, keyboard bindings, sign-in/invite, read-only leaderboard. No WebSocket or telemetry (solo game).
+- `platform` (`platform.js`): adapter over the shared StarHermit SDK (`starhermit-sdk.js`, `window.StarHermit`) — profile nickname/avatar, `game:<slug>` cloud-save mirror, settings KV, keyboard bindings, sign-in/invite, leaderboard read and score posting (`submitScore`). No WebSocket or telemetry (solo game).
 
 No module may mutate rules state except through a validated command. Rendering consumes immutable snapshots plus interpolation data. UI state and simulation state are separate so closing a drawer cannot affect a match.
 
@@ -193,7 +193,7 @@ No module may mutate rules state except through a validated command. Rendering c
 ## 6. StarHermit integration
 
 ### Packaging and launch
-- The distribution ships `starhermit.txt` at its root (`name`, `description`, `launch=index.html`, `owner`, `server=server.js`, `cover`, and one `control.<action>=<codes> | <label>` line per keyboard action) and `starhermit-sdk.js`, an unmodified copy of the canonical StarHermit client loaded before the game modules.
+- The distribution ships `starhermit.txt` at its root (`name`, `description`, `launch=index.html`, `owner`, `server=score-script.js`, `cover`, and one `control.<action>=<codes> | <label>` line per keyboard action) and `starhermit-sdk.js`, an unmodified copy of the canonical StarHermit client loaded before the game modules. `score-script.js` is the platform script (`server=`): it range-checks a round total sent through `StarHermit.submitScores` and posts it to the `high-score` leaderboard (canonical copy in the games repo's `tools/score-script.js`); `server.js` is the local dev server.
 - All platform traffic goes through the SDK; `platform.js` adapts it. `StarHermit.init()` reads `#game_token=` (library launch) or `#access_token=` (direct sign-in return) once and strips it; the slug is the `game_scope` claim. Without a token no platform request is made.
 - The SDK renews the launch token before expiry. If renewal is refused the profile line returns to the local profile, a "signed out — playing locally" toast shows, sign-in is re-offered and play continues on localStorage.
 - The dev server keeps `GET /api/v1/time` for round-trip-adjusted clocks; on `*.starhermit.com` (or when hosted) the UTC day is keyed from the device clock.
@@ -205,14 +205,14 @@ No module may mutate rules state except through a validated command. Rendering c
 - **Settings KV:** volumes, mute, theme, graphics, reduced motion, high contrast, large text, captions, hold-to-drag and left-handed layout are patched to the per-player settings store on change and applied at boot (the account value wins).
 - **Controls:** keyboard input routes by `KeyboardEvent.code` through `StarHermit.loadBindings()` (platform rebinds over the `control.*` defaults); How to play lists the effective keys. Tab cycling stays a fixed focus control.
 - **Invite:** signed in, the title shows **Invite a friend**, which copies `StarHermit.inviteLink()` to the clipboard and confirms with a toast.
-- Sign-in/invite labels and toasts are localized in all nine locales (`gfx.js` `sh` strings).
+- Sign-in/invite labels, toasts and the leaderboard line are localized in all nine locales (`gfx.js` `sh` strings).
 
 ### Achievements and leaderboards
 - Achievements are a small static local set (unlocks idempotent, cloud-saved); no server declares platform achievements.
-- Hosted results read the game's first platform board (read-only, nickname-resolved); personal bests stay local and cloud-saved. Clients never submit platform scores: on `*.starhermit.com` the submit row is hidden. Off-platform the dev server's replay-validated board (`POST/GET /api/v1/scores`) remains.
+- Signed in, every won round in a ranked mode (Journey, Daily, Challenge, Score chase) posts its total through `StarHermit.submitScores` to the `high-score` board (integer, higher is better, 0–20,000); the results screen shows "Leaderboard rank: #N" (or posted / not posted), then the board's top 10 (nickname-resolved). Learn and Practice rounds, lost rounds and standalone play post nothing. Personal bests stay local and cloud-saved. On `*.starhermit.com` the dev-server submit row is hidden. Off-platform the dev server's replay-validated board (`POST/GET /api/v1/scores`) remains.
 
 ### Not used
-- Sessions, matchmaking, friends picker, chat, replays, realtime rooms and voice, presence, activity and telemetry: the game is solo and `server.js` is a dev static/API server, not a platform session script.
+- Sessions, matchmaking, friends picker, chat, replays, realtime rooms and voice, presence, activity and telemetry: the game is solo; `score-script.js` only posts scores and `server.js` is a dev static/API server.
 
 ## 7. Content, economy, and retention
 

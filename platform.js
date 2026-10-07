@@ -84,6 +84,21 @@
         })));
     }
 
+    // ---- leaderboard posting (score-script.js) ----
+    // A won ranked round's total goes through submitScores to the high-score
+    // board; resolves { posted, rank } (rank or null). No request standalone.
+    async function submitScore(total) {
+        if (!isHosted()) return { posted: false, rank: null };
+        let keys = [];
+        try { keys = await SH.submitScores({ 'high-score': total }); } catch (e) { keys = []; }
+        if (!keys || keys.indexOf('high-score') < 0) return { posted: false, rank: null };
+        try {
+            const r = await SH.leaderboard('high-score', { pageSize: 100 });
+            const me = ((r && r.items) || []).find(i => i.userId === SH.userId);
+            return { posted: true, rank: me ? me.rank : null };
+        } catch (e) { return { posted: true, rank: null }; }
+    }
+
     // ---- settings KV, bindings, sign-in, invite ----
     async function getSettings() { return isHosted() ? SH.getSettings() : null; }
     function patchSettings(obj) { if (isHosted()) SH.patchSettings(obj); }
@@ -112,7 +127,7 @@
         myDisplayName() { return displayName(SH && SH.userId); },
         avatarUrl() { return isHosted() ? SH.avatarUrl() : Promise.resolve(null); },
         cloudStart, cloudDirty, cloudFlush, cloudLoad,
-        leaderboardRows,
+        leaderboardRows, submitScore,
         getSettings, patchSettings, loadBindings, onAuth,
         canSignIn() { return !!(SH && SH.canSignIn()); },
         signIn() { return !!(SH && SH.signIn()); },
