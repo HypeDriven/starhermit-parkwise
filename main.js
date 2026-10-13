@@ -1126,9 +1126,9 @@
             const pk = q.post && POST && !postFailed ? [q.ao, q.bloom, q.grade, q.antialias, size[0], size[1], pixelRatio].join('|') : 'none';
             if (pk !== postKey) { postKey = pk; buildPost(); }
             if (composer) {
-                try { composer.render(dt); return; } catch (e) { postFailed = true; disposeComposer(); if (infoListener) infoListener(); }
+                try { (globalThis.GameOptions ? globalThis.GameOptions.draw(composer.renderer, () => composer.render(dt)) : composer.render(dt)); return; } catch (e) { postFailed = true; disposeComposer(); if (infoListener) infoListener(); }
             }
-            renderer.render(scene, camera);
+            (globalThis.GameOptions ? globalThis.GameOptions.draw(renderer, () => renderer.render(scene, camera)) : renderer.render(scene, camera));
         }
 
         function celebrate() { spawnConfetti(); }
