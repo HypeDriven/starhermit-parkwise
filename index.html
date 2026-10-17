@@ -136,7 +136,7 @@ body.reduced-motion * { transition:none !important; animation:none !important; }
 .vehicle-list button[aria-pressed=true] { box-shadow:inset 0 0 0 2px var(--accent); }
 /* graphics settings */
 .dialog select { min-height:44px; max-width:58%; min-width:0; }
-.dialog label > span:first-child { min-width:0; }
+.dialog label > span:first-child { min-width:min-content; } /* wrap at spaces, never mid-word; controls shrink instead */
 .gfx-range { display:flex; align-items:center; gap:8px; flex:1; max-width:240px; min-width:0; white-space:nowrap; }
 .dialog .gfx-range input[type=range] { flex:1; min-width:0; min-height:44px; }
 .gfx-range output { min-width:3.2em; text-align:right; font-variant-numeric:tabular-nums; }
@@ -164,15 +164,15 @@ html.ui-scaled #game-shell { grid-template-columns: minmax(0, calc(220px * var(-
   <section id="screen-title" class="screen" aria-labelledby="title-h">
     <div class="center-col">
       <h1 class="brand" id="title-h">Parkwise</h1>
-      <p class="tagline">A rooftop parking puzzle. Slide vehicles along the way they face and open a path so the red car can reach the exit gate.</p>
-      <button class="btn primary" id="btn-play">Play</button>
+      <p class="tagline" data-i18n="A rooftop parking puzzle. Slide vehicles along the way they face and open a path so the red car can reach the exit gate.">A rooftop parking puzzle. Slide vehicles along the way they face and open a path so the red car can reach the exit gate.</p>
+      <button class="btn primary" id="btn-play" data-i18n="Play">Play</button>
       <div class="btn-row">
-        <button class="btn" id="btn-daily">Daily challenge</button>
-        <button class="btn" id="btn-journey-resume">Journey</button>
+        <button class="btn" id="btn-daily" data-i18n="Daily challenge">Daily challenge</button>
+        <button class="btn" id="btn-journey-resume" data-i18n="Journey">Journey</button>
       </div>
       <div class="btn-row">
-        <button class="btn ghost" id="btn-settings">Settings</button>
-        <button class="btn ghost" id="btn-help">How to play</button>
+        <button class="btn ghost" id="btn-settings" data-i18n="Settings">Settings</button>
+        <button class="btn ghost" id="btn-help" data-i18n="How to play">How to play</button>
       </div>
       <div class="btn-row">
         <button class="btn ghost" id="btn-sh-signin" style="display:none">Sign in with StarHermit</button>
@@ -185,9 +185,9 @@ html.ui-scaled #game-shell { grid-template-columns: minmax(0, calc(220px * var(-
   <!-- Mode select -->
   <section id="screen-modes" class="screen" aria-labelledby="modes-h">
     <div class="center-col">
-      <h2 id="modes-h">Choose a mode</h2>
+      <h2 id="modes-h" data-i18n="Choose a mode">Choose a mode</h2>
       <div class="menu-list" id="mode-list" role="list"></div>
-      <button class="btn ghost" id="btn-modes-back">Back</button>
+      <button class="btn ghost" id="btn-modes-back" data-i18n="Back">Back</button>
     </div>
   </section>
 
@@ -197,7 +197,7 @@ html.ui-scaled #game-shell { grid-template-columns: minmax(0, calc(220px * var(-
       <h2 id="setup-h">Set up</h2>
       <p class="tagline" id="setup-info"></p>
       <div class="menu-list" id="setup-list" role="list"></div>
-      <button class="btn ghost" id="btn-setup-back">Back</button>
+      <button class="btn ghost" id="btn-setup-back" data-i18n="Back">Back</button>
     </div>
   </section>
 
@@ -205,57 +205,57 @@ html.ui-scaled #game-shell { grid-template-columns: minmax(0, calc(220px * var(-
   <section id="screen-game" class="screen" aria-labelledby="objective-text">
     <div id="game-shell">
       <div id="status-bar">
-        <button class="btn ghost drawer-toggle" id="btn-rail-left" aria-label="Open objective panel">&#9776;</button>
+        <button class="btn ghost drawer-toggle" id="btn-rail-left" aria-label="Open objective panel" data-i18n-aria="Open objective panel">&#9776;</button>
         <span class="chip" id="chip-mode">Mode</span>
         <span class="chip" id="chip-moves">Moves 0</span>
         <span class="chip" id="chip-time">0:00</span>
         <span class="chip" id="chip-limit" hidden></span>
-        <button class="btn ghost" id="btn-pause" aria-label="Pause game">II Pause</button>
-        <button class="btn ghost drawer-toggle" id="btn-rail-right" aria-label="Open actions panel">&#9881;</button>
+        <button class="btn ghost" id="btn-pause" aria-label="Pause game" data-i18n-aria="Pause game">II <span data-i18n="Pause">Pause</span></button>
+        <button class="btn ghost drawer-toggle" id="btn-rail-right" aria-label="Open actions panel" data-i18n-aria="Open actions panel">&#9881;</button>
       </div>
       <div id="drawer-scrim" hidden></div>
-      <aside id="rail-left" aria-label="Objective and progress">
-        <button class="btn ghost drawer-toggle" id="btn-rail-left-close">Close panel</button>
+      <aside id="rail-left" aria-label="Objective and progress" data-i18n-aria="Objective and progress">
+        <button class="btn ghost drawer-toggle" id="btn-rail-left-close" data-i18n="Close panel">Close panel</button>
         <div class="rail-card">
-          <h3 id="objective-text">Objective</h3>
+          <h3 id="objective-text" data-i18n="Objective">Objective</h3>
           <p id="objective-desc">Guide the red car to the exit gate on the right edge.</p>
         </div>
         <div class="rail-card">
-          <h3>Progress</h3>
+          <h3 data-i18n="Progress">Progress</h3>
           <p id="progress-desc"></p>
         </div>
         <div class="rail-card">
-          <h3>Vehicles (screen-reader board model)</h3>
+          <h3 data-i18n="Vehicles (screen-reader board model)">Vehicles (screen-reader board model)</h3>
           <ul class="vehicle-list" id="vehicle-list"></ul>
         </div>
       </aside>
       <main id="field">
         <div id="canvas-wrap">
           <canvas id="game-canvas" tabindex="0" role="application"
-                  aria-label="Parking lot board. Tab cycles vehicles, arrow keys slide the selected vehicle, Shift+Tab leaves the board."></canvas>
+                  aria-label="Parking lot board. Tab cycles vehicles, arrow keys slide the selected vehicle, Shift+Tab leaves the board." data-i18n-aria="Parking lot board. Tab cycles vehicles, arrow keys slide the selected vehicle, Shift+Tab leaves the board."></canvas>
           <div id="caption-line" aria-hidden="true"></div>
         </div>
       </main>
-      <aside id="rail-right" aria-label="Actions and status">
-        <button class="btn ghost drawer-toggle" id="btn-rail-right-close">Close panel</button>
+      <aside id="rail-right" aria-label="Actions and status" data-i18n-aria="Actions and status">
+        <button class="btn ghost drawer-toggle" id="btn-rail-right-close" data-i18n="Close panel">Close panel</button>
         <div class="rail-card">
-          <h3>Actions</h3>
+          <h3 data-i18n="Actions">Actions</h3>
           <div class="btn-row" style="flex-direction:column; align-items:stretch;">
-            <button class="btn" id="btn-undo">Undo (U)</button>
-            <button class="btn" id="btn-hint">Hint (H)</button>
-            <button class="btn" id="btn-restart">Restart (R)</button>
-            <button class="btn ghost" id="btn-camera">Reset camera (C)</button>
+            <button class="btn" id="btn-undo" data-i18n="Undo (U)">Undo (U)</button>
+            <button class="btn" id="btn-hint" data-i18n="Hint (H)">Hint (H)</button>
+            <button class="btn" id="btn-restart" data-i18n="Restart (R)">Restart (R)</button>
+            <button class="btn ghost" id="btn-camera" data-i18n="Reset camera (C)">Reset camera (C)</button>
           </div>
         </div>
         <div class="rail-card">
-          <h3>Session</h3>
+          <h3 data-i18n="Session">Session</h3>
           <p id="session-desc"></p>
         </div>
       </aside>
       <div id="tray">
-        <button class="btn" id="tray-undo">Undo</button>
-        <button class="btn" id="tray-hint">Hint</button>
-        <button class="btn ghost" id="tray-restart">Restart</button>
+        <button class="btn" id="tray-undo" data-i18n="Undo">Undo</button>
+        <button class="btn" id="tray-hint" data-i18n="Hint">Hint</button>
+        <button class="btn ghost" id="tray-restart" data-i18n="Restart">Restart</button>
       </div>
     </div>
   </section>
@@ -263,12 +263,12 @@ html.ui-scaled #game-shell { grid-template-columns: minmax(0, calc(220px * var(-
   <!-- Pause overlay -->
   <div class="overlay" id="overlay-pause" role="dialog" aria-modal="true" aria-labelledby="pause-h">
     <div class="dialog">
-      <h2 id="pause-h">Paused</h2>
+      <h2 id="pause-h" data-i18n="Paused">Paused</h2>
       <div class="btn-row" style="flex-direction:column; align-items:stretch;">
-        <button class="btn primary" id="btn-resume">Resume</button>
-        <button class="btn" id="btn-pause-settings">Settings</button>
-        <button class="btn" id="btn-pause-help">Help</button>
-        <button class="btn ghost" id="btn-leave">Leave round</button>
+        <button class="btn primary" id="btn-resume" data-i18n="Resume">Resume</button>
+        <button class="btn" id="btn-pause-settings" data-i18n="Settings">Settings</button>
+        <button class="btn" id="btn-pause-help" data-i18n="Help">Help</button>
+        <button class="btn ghost" id="btn-leave" data-i18n="Leave round">Leave round</button>
       </div>
     </div>
   </div>
@@ -278,22 +278,22 @@ html.ui-scaled #game-shell { grid-template-columns: minmax(0, calc(220px * var(-
     <div class="dialog">
       <h2 id="results-h">Results</h2>
       <p id="results-headline" style="font-size:1.1em; font-weight:700;"></p>
-      <table class="score-table" id="score-breakdown" aria-label="Score breakdown"></table>
+      <table class="score-table" id="score-breakdown" aria-label="Score breakdown" data-i18n-aria="Score breakdown"></table>
       <p id="results-progress" class="tagline" style="text-align:left;"></p>
       <section id="results-compare">
-        <h3>Leaderboard</h3>
+        <h3 data-i18n="Leaderboard">Leaderboard</h3>
         <p class="tagline" style="text-align:left;" id="results-lb" hidden></p>
         <table class="score-table" id="leaderboard-table"></table>
         <div class="btn-row" id="submit-row">
-          <input id="submit-name" maxlength="24" placeholder="Display name" aria-label="Display name" style="flex:1; min-height:44px; border-radius:8px; border:none; padding:0 12px;">
+          <input id="submit-name" maxlength="24" placeholder="Display name" aria-label="Display name" data-i18n-placeholder="Display name" data-i18n-aria="Display name" style="flex:1; min-height:44px; border-radius:8px; border:none; padding:0 12px;">
           <button class="btn good" id="btn-submit-score">Submit score</button>
         </div>
         <p class="tagline" style="text-align:left;" id="submit-status"></p>
       </section>
       <div class="btn-row">
-        <button class="btn primary" id="btn-next">Next</button>
-        <button class="btn" id="btn-retry">Retry</button>
-        <button class="btn ghost" id="btn-results-exit">Exit</button>
+        <button class="btn primary" id="btn-next" data-i18n="Next">Next</button>
+        <button class="btn" id="btn-retry" data-i18n="Retry">Retry</button>
+        <button class="btn ghost" id="btn-results-exit" data-i18n="Exit">Exit</button>
       </div>
     </div>
   </div>
@@ -301,18 +301,18 @@ html.ui-scaled #game-shell { grid-template-columns: minmax(0, calc(220px * var(-
   <!-- Settings overlay -->
   <div class="overlay" id="overlay-settings" role="dialog" aria-modal="true" aria-labelledby="settings-h">
     <div class="dialog">
-      <h2 id="settings-h">Settings</h2>
-      <section aria-label="Audio">
-        <h3>Audio</h3>
-        <label>Music <input type="range" id="vol-music" min="0" max="100" value="60"></label>
-        <label>Effects <input type="range" id="vol-effects" min="0" max="100" value="80"></label>
-        <label>Ambience <input type="range" id="vol-ambience" min="0" max="100" value="40"></label>
-        <label>Voice cues <input type="range" id="vol-voice" min="0" max="100" value="70"></label>
-        <label>Mute all <input type="checkbox" id="opt-mute"></label>
+      <h2 id="settings-h" data-i18n="Settings">Settings</h2>
+      <section aria-label="Audio" data-i18n-aria="Audio">
+        <h3 data-i18n="Audio">Audio</h3>
+        <label><span data-i18n="Music">Music</span> <input type="range" id="vol-music" min="0" max="100" value="60"></label>
+        <label><span data-i18n="Effects">Effects</span> <input type="range" id="vol-effects" min="0" max="100" value="80"></label>
+        <label><span data-i18n="Ambience">Ambience</span> <input type="range" id="vol-ambience" min="0" max="100" value="40"></label>
+        <label><span data-i18n="Voice cues">Voice cues</span> <input type="range" id="vol-voice" min="0" max="100" value="70"></label>
+        <label><span data-i18n="Mute all">Mute all</span> <input type="checkbox" id="opt-mute"></label>
       </section>
       <section aria-labelledby="gfx-h" id="gfx-section">
         <h3 id="gfx-h">Graphics</h3>
-        <label>Theme <select id="opt-theme" style="min-height:44px;"></select></label>
+        <label><span data-i18n="Theme">Theme</span> <select id="opt-theme" style="min-height:44px;"></select></label>
         <label><span id="gfx-l-preset">Quality</span> <select id="gfx-preset" data-gfx="preset"></select></label>
         <label><span id="gfx-l-scale">Render scale</span>
           <span class="gfx-range"><input type="range" id="gfx-scale" data-gfx="render_scale" min="50" max="200" step="10" value="100"><output id="gfx-scale-val" for="gfx-scale">100%</output></span>
@@ -323,42 +323,42 @@ html.ui-scaled #game-shell { grid-template-columns: minmax(0, calc(220px * var(-
         <p id="gfx-summary" class="gfx-summary"></p>
         <p id="gfx-note" class="gfx-note" role="status" hidden></p>
       </section>
-      <section aria-label="Accessibility">
-        <h3>Accessibility</h3>
-        <label>Reduced motion <input type="checkbox" id="opt-reduced-motion"></label>
-        <label>High contrast <input type="checkbox" id="opt-high-contrast"></label>
-        <label>Larger text <input type="checkbox" id="opt-large-text"></label>
-        <label>Text captions for sounds <input type="checkbox" id="opt-captions" checked></label>
-        <label>Hold-to-drag (vs tap-tap) <input type="checkbox" id="opt-hold-drag" checked></label>
-        <label>Left-handed tray <input type="checkbox" id="opt-lefty"></label>
-        <button class="btn ghost" id="btn-replay-tutorial">Replay tutorial</button>
+      <section aria-label="Accessibility" data-i18n-aria="Accessibility">
+        <h3 data-i18n="Accessibility">Accessibility</h3>
+        <label><span data-i18n="Reduced motion">Reduced motion</span> <input type="checkbox" id="opt-reduced-motion"></label>
+        <label><span data-i18n="High contrast">High contrast</span> <input type="checkbox" id="opt-high-contrast"></label>
+        <label><span data-i18n="Larger text">Larger text</span> <input type="checkbox" id="opt-large-text"></label>
+        <label><span data-i18n="Text captions for sounds">Text captions for sounds</span> <input type="checkbox" id="opt-captions" checked></label>
+        <label><span data-i18n="Hold-to-drag (vs tap-tap)">Hold-to-drag (vs tap-tap)</span> <input type="checkbox" id="opt-hold-drag" checked></label>
+        <label><span data-i18n="Left-handed tray">Left-handed tray</span> <input type="checkbox" id="opt-lefty"></label>
+        <button class="btn ghost" id="btn-replay-tutorial" data-i18n="Replay tutorial">Replay tutorial</button>
       </section>
-      <div class="btn-row"><button class="btn primary" id="btn-settings-close">Done</button></div>
+      <div class="btn-row"><button class="btn primary" id="btn-settings-close" data-i18n="Done">Done</button></div>
     </div>
   </div>
 
   <!-- Help overlay -->
   <div class="overlay" id="overlay-help" role="dialog" aria-modal="true" aria-labelledby="help-h">
     <div class="dialog">
-      <h2 id="help-h">How to play</h2>
+      <h2 id="help-h" data-i18n="How to play">How to play</h2>
       <section>
-        <h3>Goal</h3>
-        <p>Slide vehicles along the direction they face until the red car can drive straight out through the glowing exit gate on the right edge of the lot.</p>
+        <h3 data-i18n="Goal">Goal</h3>
+        <p data-i18n="Slide vehicles along the direction they face until the red car can drive straight out through the glowing exit gate on the right edge of the lot.">Slide vehicles along the direction they face until the red car can drive straight out through the glowing exit gate on the right edge of the lot.</p>
       </section>
       <section>
-        <h3>Controls</h3>
+        <h3 data-i18n="Controls">Controls</h3>
         <ul style="padding-left:20px; color:var(--dim);">
-          <li>Pointer/touch: tap a vehicle to select, then drag along its axis, or tap a glowing target marker.</li>
-          <li>Keyboard: Tab into the board, then Tab cycles vehicles and arrow keys slide the selected one. Shift+Tab leaves the board for the buttons.</li>
+          <li data-i18n="Pointer/touch: tap a vehicle to select, then drag along its axis, or tap a glowing target marker.">Pointer/touch: tap a vehicle to select, then drag along its axis, or tap a glowing target marker.</li>
+          <li data-i18n="Keyboard: Tab into the board, then Tab cycles vehicles and arrow keys slide the selected one. Shift+Tab leaves the board for the buttons.">Keyboard: Tab into the board, then Tab cycles vehicles and arrow keys slide the selected one. Shift+Tab leaves the board for the buttons.</li>
           <li id="help-keys">← → ↑ ↓ slide, U undo, H hint, R restart, C reset camera, P/Esc pause.</li>
-          <li>Gamepad: D-pad/left stick navigate, A confirm, B cancel, Start pause.</li>
+          <li data-i18n="Gamepad: D-pad/left stick navigate, A confirm, B cancel, Start pause.">Gamepad: D-pad/left stick navigate, A confirm, B cancel, Start pause.</li>
         </ul>
       </section>
       <section>
-        <h3>Scoring</h3>
-        <p>Score combines a completion base, a bonus for beating the move par, a time bonus, and penalties for hints and blocked attempts. Fewer moves and faster solves score higher.</p>
+        <h3 data-i18n="Scoring">Scoring</h3>
+        <p data-i18n="Score combines a completion base, a bonus for beating the move par, a time bonus, and penalties for hints and blocked attempts. Fewer moves and faster solves score higher.">Score combines a completion base, a bonus for beating the move par, a time bonus, and penalties for hints and blocked attempts. Fewer moves and faster solves score higher.</p>
       </section>
-      <div class="btn-row"><button class="btn primary" id="btn-help-close">Close</button></div>
+      <div class="btn-row"><button class="btn primary" id="btn-help-close" data-i18n="Close">Close</button></div>
     </div>
   </div>
 
@@ -374,6 +374,14 @@ html.ui-scaled #game-shell { grid-template-columns: minmax(0, calc(220px * var(-
   import * as THREE from 'three';
   window.THREE = THREE;
 </script>
+<script src="/sh-language.js"></script>
+<script src="/locales/en-GB.js"></script>
+<script src="/locales/es.js"></script>
+<script src="/locales/de.js"></script>
+<script src="/locales/fr.js"></script>
+<script src="/locales/pt.js"></script>
+<script src="/locales/it.js"></script>
+<script src="/i18n.js"></script>
 <script src="/starhermit-sdk.js"></script>
 <script type="module" src="/rules.js"></script>
 <script type="module" src="/content.js"></script>

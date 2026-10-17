@@ -82,7 +82,7 @@
         return TABLE[preset] ? TABLE[preset][cat] : undefined;
     }
 
-    // ---- panel strings (the rest of the game UI is English-only) ----
+    // ---- panel strings (the rest of the UI is translated in locales/*.js) ----
     const EN = {
         graphics: 'Graphics', quality: 'Quality', auto: 'Auto (detected: {tier})',
         renderScale: 'Render scale', fromPreset: 'From preset ({tier})',

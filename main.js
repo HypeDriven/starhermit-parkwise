@@ -8,6 +8,8 @@
     const R = window.PARKWISE_RULES;
     const C = window.PARKWISE_CONTENT;
     const A = window.PARKWISE_AUDIO;
+    const I = window.PARKWISE_I18N;
+    const T = I.T, N = I.N;
 
     const $ = id => document.getElementById(id);
 
@@ -55,16 +57,16 @@
     progress.bestScores = progress.bestScores || {};
 
     const ACHIEVEMENTS = {
-        first_completion: 'First clear — solve your first lot',
-        mechanic_mastery: 'Mechanic — solve a stage without undo or hints',
-        streak_3: 'Regular — win three rounds in a row',
-        milestone_hard: 'Rooftop veteran — clear a mastery stage',
-        long_term: 'Commuter — 50 career wins',
+        first_completion: N('First clear — solve your first lot'),
+        mechanic_mastery: N('Mechanic — solve a stage without undo or hints'),
+        streak_3: N('Regular — win three rounds in a row'),
+        milestone_hard: N('Rooftop veteran — clear a mastery stage'),
+        long_term: N('Commuter — 50 career wins'),
     };
     function unlockAchievement(key) {
         if (progress.achievements[key]) return;
         progress.achievements[key] = Date.now();
-        announce('Achievement unlocked: ' + ACHIEVEMENTS[key]);
+        announce(T('Achievement unlocked: {name}', { name: T(ACHIEVEMENTS[key]) }));
         A.playSfx('win');
         saveProgress();
     }
@@ -110,8 +112,10 @@
         const el = $('help-keys');
         if (!el) return;
         const k = a => keys[a].map(keyLabel).join('/');
-        el.textContent = [k('left'), k('right'), k('up'), k('down')].join(' ') + ' slide, ' + k('undo') + ' undo, ' + k('hint') + ' hint, ' +
-            k('restart') + ' restart, ' + k('camera') + ' reset camera, ' + k('pause') + '/' + k('menu') + ' pause.';
+        el.textContent = T('{arrows} slide, {undo} undo, {hint} hint, {restart} restart, {camera} reset camera, {pause} pause.', {
+            arrows: [k('left'), k('right'), k('up'), k('down')].join(' '), undo: k('undo'), hint: k('hint'),
+            restart: k('restart'), camera: k('camera'), pause: k('pause') + '/' + k('menu'),
+        });
     }
 
     // Title account buttons: sign-in only where the platform offers it, invite only when signed in.
@@ -133,15 +137,15 @@
     function renderProfileLine() {
         const el = $('profile-line');
         if (!platform.hosted) {
-            el.textContent = 'Local profile — progress is saved on this device.';
+            el.textContent = T('Local profile — progress is saved on this device.');
             return;
         }
-        const syncText = {
-            saving: 'saving to your account…',
-            synced: 'progress synced to your account',
-            offline: 'offline — changes stay on this device',
-        }[platform.sync] || 'progress follows this account';
-        el.textContent = (platform.nickname || 'Player') + ' — ' + syncText;
+        const syncText = T({
+            saving: N('saving to your account…'),
+            synced: N('progress synced to your account'),
+            offline: N('offline — changes stay on this device'),
+        }[platform.sync] || N('progress follows this account'));
+        el.textContent = (platform.nickname || T('Player')) + ' — ' + syncText;
         if (platform.avatar) {
             const img = document.createElement('img');
             img.className = 'avatar'; img.src = platform.avatar; img.alt = ''; img.width = 20; img.height = 20;
@@ -149,7 +153,9 @@
         }
     }
 
-    // Remote snapshot wins conflicts; localStorage stays the offline cache.
+    // A cloud doc never simply replaces this device's progress: PF.mergeProgress
+    // keeps the better result of each record (launch load and saveconflict).
+    // Settings follow the account; localStorage stays the offline cache.
     function applyRemoteDoc(doc) {
         if (!doc || typeof doc !== 'object') return false;
         if (doc.settings && typeof doc.settings === 'object') {
@@ -158,7 +164,9 @@
             normalizeGraphics(settings);
         }
         if (doc.progress && typeof doc.progress === 'object') {
-            Object.assign(progress, doc.progress);
+            const merged = PF.mergeProgress(doc.progress, progress);
+            for (const k of Object.keys(progress)) delete progress[k];
+            Object.assign(progress, merged);
             progress.bestScores = progress.bestScores || {};
         }
         saveJson(SETTINGS_KEY, settings); // refresh the cache without re-uploading
@@ -190,9 +198,18 @@
         try {
             const remote = await PF.cloudLoad();
             PF.cloudStart(cloudDoc);
-            if (remote) applyRemoteDoc(remote); // remote-preferred load
-            else PF.cloudDirty(); // no remote save yet: mirror the local cache up once
+            if (remote) {
+                const before = JSON.stringify(remote.progress || null);
+                applyRemoteDoc(remote); // merged with the local progress
+                if (JSON.stringify(progress) !== before) PF.cloudDirty(); // write the merge back
+            } else PF.cloudDirty(); // no remote save yet: mirror the local cache up once
         } catch (e) { PF.cloudStart(cloudDoc); /* offline start: the local cache stays authoritative */ }
+        // Another device saved first: the SDK refused our write; re-read, merge, save again.
+        PF.onSaveConflict(async () => {
+            const remote = await PF.cloudLoad().catch(() => null);
+            if (remote) applyRemoteDoc(remote);
+            PF.cloudDirty();
+        });
         // the account's preferences (settings KV) win over the local copy
         try {
             const kv = await PF.getSettings();
@@ -226,11 +243,14 @@
         lastAnnounce = text;
         $('sr-announcer').textContent = text;
     }
-    let captionTimer = null;
+    let captionTimer = null, captionKey = null;
+    // Audio captions arrive in English (audio.js); show them in the game language.
+    const CAPTIONS = [N('Vehicle selected'), N('Vehicle slid'), N('That move is blocked'), N('Move undone'), N('Hint shown'), N('Puzzle solved'), N('Round over'), N('Paused')];
     A.onCaption(text => {
         if (!settings.captions) return;
         const el = $('caption-line');
-        el.textContent = text;
+        captionKey = text;
+        el.textContent = T(text);
         el.classList.add('show');
         clearTimeout(captionTimer);
         captionTimer = setTimeout(() => el.classList.remove('show'), 1800);
@@ -286,7 +306,7 @@
         if (reason) {
             session.invalidCount++;
             A.playSfx('invalid');
-            announce('Cannot move: ' + reason + '.');
+            announce(T('Cannot move: {reason}.', { reason: T(reason) }));
             render.flashInvalid(vIdx);
             ui.refreshHud();
             return false;
@@ -300,7 +320,7 @@
         const won = R.isWin(session.state);
         if (won) return endRound(true);
         const lim = session.entry.challenge;
-        if (lim && lim.moveLimit && session.state.moves > lim.moveLimit) return endRound(false, 'Move limit reached');
+        if (lim && lim.moveLimit && session.state.moves > lim.moveLimit) return endRound(false, N('Move limit reached'));
         render.syncVehicles(true);
         ui.refreshAll();
         return true;
@@ -321,17 +341,18 @@
     function requestHint() {
         if (!session || session.over) return;
         if (session.entry.challenge && session.entry.challenge.noHint) {
-            announce('Hints are disabled in this challenge.');
+            announce(T('Hints are disabled in this challenge.'));
             A.playSfx('invalid');
             return;
         }
         const sol = R.solve(session.state);
-        if (!sol || !sol.firstMove) { announce('No hint available.'); return; }
+        if (!sol || !sol.firstMove) { announce(T('No hint available.')); return; }
         session.hintsUsed++;
         session.hintShown = sol.firstMove;
         const v = session.state.vehicles[sol.firstMove.v];
         A.playSfx('hint');
-        announce('Hint: try moving the ' + vehicleName(v) + ' ' + (sol.firstMove.dir > 0 ? (v.ori === 'h' ? 'right' : 'down') : (v.ori === 'h' ? 'left' : 'up')) + '.');
+        const way = sol.firstMove.dir > 0 ? (v.ori === 'h' ? N('right') : N('down')) : (v.ori === 'h' ? N('left') : N('up'));
+        announce(T('Hint: try moving the {vehicle} {dir}.', { vehicle: vehicleName(v), dir: T(way) }));
         render.highlightHint(sol.firstMove);
         ui.refreshHud();
     }
@@ -339,7 +360,7 @@
     function endRound(won, loseReason) {
         session.over = true;
         session.won = won;
-        setAppState('resolving', won ? 'Solved!' : 'Round over');
+        setAppState('resolving', won ? T('Solved!') : T('Round over'));
         const secs = sessionElapsedSec();
         const sc = R.score({
             par: session.entry.par, moves: session.state.moves, seconds: secs,
@@ -388,7 +409,7 @@
             renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
         } catch (e) {
             $('compat-message').style.display = 'block';
-            $('compat-message').textContent = 'WebGL is unavailable. Parkwise needs 3D graphics; your progress is safe on this device.';
+            $('compat-message').textContent = T('WebGL is unavailable. Parkwise needs 3D graphics; your progress is safe on this device.');
             // headless stub with the same surface as the renderer below
             return {
                 buildBoard() {}, syncVehicles() {}, flashInvalid() {}, select() {},
@@ -1156,20 +1177,22 @@
 
     // ================= UI =================
     function vehicleName(v) {
-        return (v.target ? 'red car' : (v.ori === 'h' ? 'sideways' : 'upright') + ' ' + (v.len === 3 ? 'van' : 'car') + ' ' + v.id);
+        if (v.target) return T('red car');
+        const key = v.ori === 'h' ? (v.len === 3 ? N('sideways van {id}') : N('sideways car {id}')) : (v.len === 3 ? N('upright van {id}') : N('upright car {id}'));
+        return T(key, { id: v.id });
     }
 
     const ui = {
         refreshAll() { this.refreshHud(); this.refreshVehicleList(); this.refreshObjective(); },
         refreshHud() {
             if (!session) return;
-            $('chip-mode').textContent = modeLabel(session.mode) + (session.entry.challenge ? ' · ' + session.entry.challenge.kind : '');
-            $('chip-moves').textContent = 'Moves ' + session.state.moves + ' / par ' + session.entry.par;
+            $('chip-mode').textContent = modeLabel(session.mode) + (session.entry.challenge ? ' · ' + kindLabel(session.entry.challenge.kind) : '');
+            $('chip-moves').textContent = T('Moves {n} / par {par}', { n: session.state.moves, par: session.entry.par });
             $('chip-time').textContent = formatTime(sessionElapsedSec());
             const lim = session.entry.challenge;
             const limChip = $('chip-limit');
-            if (lim && lim.moveLimit) { limChip.hidden = false; limChip.textContent = 'Limit ' + lim.moveLimit; }
-            else if (lim && lim.timeLimit) { limChip.hidden = false; limChip.textContent = 'Left ' + formatTime(Math.max(0, lim.timeLimit - sessionElapsedSec())); }
+            if (lim && lim.moveLimit) { limChip.hidden = false; limChip.textContent = T('Limit {n}', { n: lim.moveLimit }); }
+            else if (lim && lim.timeLimit) { limChip.hidden = false; limChip.textContent = T('Left {time}', { time: formatTime(Math.max(0, lim.timeLimit - sessionElapsedSec())) }); }
             else limChip.hidden = true;
             $('btn-undo').disabled = $('tray-undo').disabled = !session.history.length || session.over;
             $('btn-hint').disabled = $('tray-hint').disabled = session.over || (session.entry.challenge && session.entry.challenge.noHint);
@@ -1177,15 +1200,16 @@
         refreshObjective() {
             if (!session) return;
             const blockers = R.exitBlockers(session.state);
-            $('objective-desc').textContent = blockers.length
-                ? 'Guide the red car to the glowing exit gate. ' + blockers.length + ' vehicle' + (blockers.length > 1 ? 's block' : ' blocks') + ' the lane.'
-                : 'The lane is clear — drive the red car out!';
+            $('objective-desc').textContent = session.mode === 'learn' && session.tutorialText && session.state.moves === 0
+                ? T(session.tutorialText)
+                : blockers.length === 1 ? T('Guide the red car to the glowing exit gate. 1 vehicle blocks the lane.')
+                : blockers.length ? T('Guide the red car to the glowing exit gate. {n} vehicles block the lane.', { n: blockers.length })
+                : T('The lane is clear — drive the red car out!');
             $('progress-desc').textContent =
-                'Mode: ' + modeLabel(session.mode) + ' · Stage par ' + session.entry.par +
-                ' · Hints used ' + session.hintsUsed + ' · Wins ' + progress.wins +
-                (session.entry.challenge ? ' · Constraint: ' + session.entry.challenge.kind : '');
-            $('session-desc').textContent = 'Seed ' + session.entry.seed.toString(16) + ' · content v' + session.entry.version +
-                ' · replay log ' + session.commands.length + ' commands';
+                T('Mode: {mode} · Stage par {par} · Hints used {hints} · Wins {wins}', { mode: modeLabel(session.mode), par: session.entry.par, hints: session.hintsUsed, wins: progress.wins }) +
+                (session.entry.challenge ? ' · ' + T('Constraint: {kind}', { kind: kindLabel(session.entry.challenge.kind) }) : '');
+            $('session-desc').textContent = T('Seed {seed} · content v{version} · replay log {n} commands', {
+                seed: session.entry.seed.toString(16), version: session.entry.version, n: session.commands.length });
         },
         refreshVehicleList() {
             if (!session) return;
@@ -1204,14 +1228,17 @@
             }
             session.state.vehicles.forEach((v, i) => {
                 const b = ul.children[i].firstChild;
-                b.textContent = vehicleName(v) + ' at column ' + (v.x + 1) + ', row ' + (v.y + 1) + (v.target ? ' (target)' : '');
+                b.textContent = T('{vehicle} at column {c}, row {r}', { vehicle: vehicleName(v), c: v.x + 1, r: v.y + 1 }) + (v.target ? T(' (target)') : '');
                 b.setAttribute('aria-pressed', i === session.selected ? 'true' : 'false');
             });
         },
     };
 
     function modeLabel(m) {
-        return { learn: 'Learn', journey: 'Journey', daily: 'Daily', practice: 'Practice', challenge: 'Challenge', score: 'Score chase' }[m] || m;
+        return T({ learn: N('Learn'), journey: N('Journey'), daily: N('Daily'), practice: N('Practice'), challenge: N('Challenge'), score: N('Score chase') }[m] || m);
+    }
+    function kindLabel(k) {
+        return T({ 'move-limit': N('move limit'), speed: N('speed'), 'no-hint': N('no hints') }[k] || k);
     }
     function formatTime(s) {
         return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
@@ -1223,17 +1250,17 @@
         A.playSfx('select');
         render.select(); // move the ring/markers without snapping in-flight slides
         ui.refreshVehicleList();
-        announce(vehicleName(session.state.vehicles[i]) + ' selected.');
+        announce(T('{vehicle} selected.', { vehicle: vehicleName(session.state.vehicles[i]) }));
     }
 
     // ================= screens wiring =================
     const MODES = [
-        { id: 'learn', title: 'Learn', desc: 'Interactive lessons — one rule at a time. Unranked.', ranked: false },
-        { id: 'journey', title: 'Journey', desc: C.JOURNEY_COUNT + ' authored stages with mastery checks. Progress saved.', ranked: true },
-        { id: 'daily', title: 'Daily', desc: 'One shared lot per UTC day. Ranked, validated on the server.', ranked: true },
-        { id: 'practice', title: 'Practice', desc: 'Pick a difficulty, unlimited retry and undo. Unranked.', ranked: false },
-        { id: 'challenge', title: 'Challenge', desc: 'Move limits, speed targets, restricted tools.', ranked: true },
-        { id: 'score', title: 'Score chase', desc: 'Chase the leaderboard on fixed validated seeds.', ranked: true },
+        { id: 'learn', title: N('Learn'), desc: N('Interactive lessons — one rule at a time. Unranked.'), ranked: false },
+        { id: 'journey', title: N('Journey'), desc: N('{n} authored stages with mastery checks. Progress saved.'), ranked: true },
+        { id: 'daily', title: N('Daily'), desc: N('One shared lot per UTC day. Ranked, validated on the server.'), ranked: true },
+        { id: 'practice', title: N('Practice'), desc: N('Pick a difficulty, unlimited retry and undo. Unranked.'), ranked: false },
+        { id: 'challenge', title: N('Challenge'), desc: N('Move limits, speed targets, restricted tools.'), ranked: true },
+        { id: 'score', title: N('Score chase'), desc: N('Chase the leaderboard on fixed validated seeds.'), ranked: true },
     ];
 
     function buildModeList() {
@@ -1243,29 +1270,31 @@
             const b = document.createElement('button');
             b.className = 'menu-item';
             b.setAttribute('role', 'listitem');
-            let meta = m.ranked ? 'Ranked' : 'Unranked';
-            if (m.id === 'journey') meta = 'Stage ' + (progress.journeyUnlocked + 1) + ' of ' + C.JOURNEY_COUNT;
-            if (m.id === 'daily') meta = progress.lastDaily === todayKey() ? 'Done today' : 'New today';
-            b.innerHTML = '<span><span class="title">' + m.title + '</span><br><span class="desc">' + m.desc + '</span></span><span class="meta">' + meta + '</span>';
+            let meta = m.ranked ? T('Ranked') : T('Unranked');
+            if (m.id === 'journey') meta = T('Stage {n} of {total}', { n: progress.journeyUnlocked + 1, total: C.JOURNEY_COUNT });
+            if (m.id === 'daily') meta = progress.lastDaily === todayKey() ? T('Done today') : T('New today');
+            b.innerHTML = '<span><span class="title">' + T(m.title) + '</span><br><span class="desc">' + T(m.desc, { n: C.JOURNEY_COUNT }) + '</span></span><span class="meta">' + meta + '</span>';
             b.addEventListener('click', () => { A.playSfx('click'); openSetup(m.id); });
             list.appendChild(b);
         }
     }
 
-    function openSetup(mode) {
-        setAppState('preparing', modeLabel(mode) + ' setup');
+    let setupMode = null;
+    function openSetup(mode, quiet) {
+        setupMode = mode;
+        setAppState('preparing', quiet ? null : T('{mode} setup', { mode: modeLabel(mode) }));
         const list = $('setup-list');
         list.innerHTML = '';
         $('setup-h').textContent = modeLabel(mode);
         const info = {
-            learn: 'Four short lessons. Expected 2–4 minutes. Unranked, undo allowed.',
-            journey: 'Stages get denser and deeper; every tenth is a mastery stage. Ranked, undo and hints allowed with score penalties.',
-            daily: 'Same lot for everyone this UTC day. Ranked; score is validated by the server from your replay log.',
-            practice: 'Casual generated lots. Restart and undo freely; no rating impact.',
-            challenge: 'Constraints apply — watch the HUD limit chip. Ranked.',
-            score: 'Fixed seeds, asynchronous global and friends comparison. Ranked.',
+            learn: N('Four short lessons. Expected 2–4 minutes. Unranked, undo allowed.'),
+            journey: N('Stages get denser and deeper; every tenth is a mastery stage. Ranked, undo and hints allowed with score penalties.'),
+            daily: N('Same lot for everyone this UTC day. Ranked; score is validated by the server from your replay log.'),
+            practice: N('Casual generated lots. Restart and undo freely; no rating impact.'),
+            challenge: N('Constraints apply — watch the HUD limit chip. Ranked.'),
+            score: N('Fixed seeds, asynchronous global and friends comparison. Ranked.'),
         }[mode];
-        $('setup-info').textContent = info;
+        $('setup-info').textContent = T(info);
 
         function addItem(label, meta, fn, disabled) {
             const b = document.createElement('button');
@@ -1277,29 +1306,29 @@
         }
 
         if (mode === 'learn') {
-            C.TUTORIALS.forEach((t, i) => addItem((i + 1) + '. ' + t.title, progress.tutorialsDone.includes(t.id) ? 'completed' : '', () => startLearn(i)));
+            C.TUTORIALS.forEach((t, i) => addItem((i + 1) + '. ' + T(t.title), progress.tutorialsDone.includes(t.id) ? T('completed') : '', () => startLearn(i)));
         } else if (mode === 'journey') {
             for (let i = 0; i < C.JOURNEY_COUNT; i++) {
                 const locked = i > progress.journeyUnlocked;
                 const stars = progress.stars['journey-' + (i + 1)] || 0;
-                addItem('Stage ' + (i + 1) + (C.difficultyFor(i).mastery ? ' · Mastery' : ''),
-                    locked ? 'locked' : '★'.repeat(stars) || 'new', () => startJourney(i), locked);
+                addItem(T('Stage {n}', { n: i + 1 }) + (C.difficultyFor(i).mastery ? ' · ' + T('Mastery') : ''),
+                    locked ? T('locked') : '★'.repeat(stars) || T('new'), () => startJourney(i), locked);
             }
         } else if (mode === 'daily') {
-            addItem('Today’s lot (' + todayKey() + ')', 'one shared lot per UTC day', () => startDaily());
+            addItem(T('Today’s lot ({date})', { date: todayKey() }), T('one shared lot per UTC day'), () => startDaily());
         } else if (mode === 'practice') {
-            addItem('Easy', 'short solutions', () => startPractice(0));
-            addItem('Medium', 'deeper planning', () => startPractice(1));
-            addItem('Hard', 'dense lots', () => startPractice(2));
+            addItem(T('Easy'), T('short solutions'), () => startPractice(0));
+            addItem(T('Medium'), T('deeper planning'), () => startPractice(1));
+            addItem(T('Hard'), T('dense lots'), () => startPractice(2));
         } else if (mode === 'challenge') {
             for (let i = 0; i < 6; i++) {
                 const e = C.challengeLevel(i);
-                addItem('Challenge ' + (i + 1) + ' — ' + e.challenge.kind,
-                    e.challenge.moveLimit ? 'move limit ' + e.challenge.moveLimit : e.challenge.timeLimit ? e.challenge.timeLimit + 's target' : 'no hints',
+                addItem(T('Challenge {n} — {kind}', { n: i + 1, kind: kindLabel(e.challenge.kind) }),
+                    e.challenge.moveLimit ? T('move limit {n}', { n: e.challenge.moveLimit }) : e.challenge.timeLimit ? T('{n}s target', { n: e.challenge.timeLimit }) : T('no hints'),
                     () => startChallenge(i));
             }
         } else if (mode === 'score') {
-            for (let i = 0; i < 5; i++) addItem('Fixed seed ' + (i + 1), 'global board', () => startScore(i));
+            for (let i = 0; i < 5; i++) addItem(T('Fixed seed {n}', { n: i + 1 }), T('global board'), () => startScore(i));
         }
     }
 
@@ -1319,24 +1348,24 @@
     function startLearn(i) {
         const t = C.TUTORIALS[i];
         const entry = { id: t.id, version: C.CONTENT_VERSION, seed: 100 + i, level: t.level, par: 2, mechanics: ['slide'], tutorial: true, theme: 'day', mastery: false };
-        beginRound('learn', entry, 'Lesson ' + (i + 1) + ': ' + t.title + '. ' + t.text);
+        beginRound('learn', entry, T('Lesson {n}: {title}.', { n: i + 1, title: T(t.title) }) + ' ' + T(t.text));
         session.tutorialText = t.text;
-        $('objective-desc').textContent = t.text;
+        $('objective-desc').textContent = T(t.text);
     }
-    function startJourney(i) { beginRound('journey', C.journeyLevel(i), 'Journey stage ' + (i + 1) + '.'); }
+    function startJourney(i) { beginRound('journey', C.journeyLevel(i), T('Journey stage {n}.', { n: i + 1 })); }
     function startPractice(tier) {
         const gen = C.practiceLevel(tier);
         const attempt = (session && session.practiceAttempt) || 0;
-        beginRound('practice', gen(attempt), 'Practice round.');
+        beginRound('practice', gen(attempt), T('Practice round.'));
         session.practiceTier = tier;
     }
-    function startChallenge(i) { beginRound('challenge', C.challengeLevel(i), 'Challenge: ' + C.challengeLevel(i).challenge.kind + '.'); }
+    function startChallenge(i) { beginRound('challenge', C.challengeLevel(i), T('Challenge: {kind}.', { kind: kindLabel(C.challengeLevel(i).challenge.kind) })); }
     function startScore(i) {
         const entry = C.journeyLevel(5 + i * 7);
-        beginRound('score', entry, 'Score chase seed ' + (i + 1) + '.');
+        beginRound('score', entry, T('Score chase seed {n}.', { n: i + 1 }));
     }
     function startDaily() {
-        const finish = day => beginRound('daily', C.dailyLevel(day), 'Daily challenge for ' + day + '.');
+        const finish = day => beginRound('daily', C.dailyLevel(day), T('Daily challenge for {day}.', { day }));
         // hosted: the platform exposes no time route, so key the day from the local UTC clock
         if (platform.hosted || onPlatformHost) return finish(todayKey());
         // local dev: synchronize to the game server's clock with round-trip adjustment
@@ -1370,23 +1399,39 @@
     }
     function closeAllOverlays() { document.querySelectorAll('.overlay').forEach(o => o.classList.remove('active')); }
 
+    // Results text, re-rendered in place when the language changes.
+    let lastResults = null;
+    function renderResultsText() {
+        const r = lastResults;
+        if (!r) return;
+        const { won, sc, loseReason, moves, secs } = r;
+        $('results-h').textContent = won ? T('Lot cleared!') : T('Round over');
+        $('results-headline').textContent = won
+            ? T('Solved in {moves} moves and {time}.', { moves, time: formatTime(secs) })
+            : T(loseReason || N('The lot stayed jammed.'));
+        const rows = [
+            [N('Completion base'), sc.base], [N('Move efficiency'), sc.parBonus], [N('Time bonus'), sc.timeBonus],
+            [N('Hint penalty'), sc.hintPenalty], [N('Blocked-attempt penalty'), sc.invalidPenalty],
+            [N('Challenge bonus'), sc.challengeBonus],
+        ];
+        $('score-breakdown').innerHTML = rows.filter(row => row[1] !== 0).map(row => '<tr><td>' + T(row[0]) + '</td><td>' + row[1] + '</td></tr>').join('') +
+            '<tr class="total"><td>' + T('Total') + '</td><td>' + sc.total + '</td></tr>';
+        $('results-progress').textContent = won
+            ? T('Career wins: {wins} · Journey stage {n} unlocked', { wins: progress.wins, n: progress.journeyUnlocked + 1 })
+            : T('Retry to keep your streak alive.');
+        if ($('submit-row').style.display !== 'none') {
+            $('btn-submit-score').textContent = platform.hosted && platform.nickname
+                ? T('Submit as {name}', { name: platform.nickname })
+                : T('Submit score');
+        }
+        if (lbLine) renderLbLine();
+    }
     function showResults(won, sc, loseReason) {
         setAppState('results');
         if (won) render.celebrate();
-        $('results-h').textContent = won ? 'Lot cleared!' : 'Round over';
-        $('results-headline').textContent = won
-            ? 'Solved in ' + session.state.moves + ' moves and ' + formatTime(sessionElapsedSec()) + '.'
-            : (loseReason || 'The lot stayed jammed.');
-        const rows = [
-            ['Completion base', sc.base], ['Move efficiency', sc.parBonus], ['Time bonus', sc.timeBonus],
-            ['Hint penalty', sc.hintPenalty], ['Blocked-attempt penalty', sc.invalidPenalty],
-            ['Challenge bonus', sc.challengeBonus],
-        ];
-        $('score-breakdown').innerHTML = rows.filter(r => r[1] !== 0).map(r => '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>').join('') +
-            '<tr class="total"><td>Total</td><td>' + sc.total + '</td></tr>';
-        $('results-progress').textContent = won
-            ? 'Career wins: ' + progress.wins + ' · Journey stage ' + (progress.journeyUnlocked + 1) + ' unlocked'
-            : 'Retry to keep your streak alive.';
+        lastResults = { won, sc, loseReason, moves: session.state.moves, secs: sessionElapsedSec() };
+        lbLine = null;
+        renderResultsText();
         // clients never submit platform scores: the validated submit exists only on the dev server
         const ranked = ['journey', 'daily', 'score'].includes(session.mode) && won && !onPlatformHost;
         $('submit-row').style.display = ranked ? '' : 'none';
@@ -1395,11 +1440,11 @@
             // field only exists for the local dev server
             $('submit-name').style.display = platform.hosted ? 'none' : '';
             $('btn-submit-score').textContent = platform.hosted && platform.nickname
-                ? 'Submit as ' + platform.nickname
-                : 'Submit score';
+                ? T('Submit as {name}', { name: platform.nickname })
+                : T('Submit score');
         }
         $('submit-status').textContent = '';
-        $('leaderboard-table').innerHTML = '<tr><td>Loading…</td></tr>';
+        $('leaderboard-table').innerHTML = '<tr><td>' + T('Loading…') + '</td></tr>';
         const modeDef = MODES.find(m => m.id === session.mode);
         if (won && modeDef && modeDef.ranked && platform.hosted && PF) postToLeaderboard(sc.total);
         else { $('results-lb').hidden = true; refreshLeaderboard(); }
@@ -1410,14 +1455,22 @@
 
     // Signed in only: a won ranked round posts its total through the platform
     // (score-script.js), shows the player's rank and then reloads the board.
+    let lbLine = null;   // { pending } or the posting result, re-rendered on a language change
+    function renderLbLine() {
+        const r = lbLine, line = $('results-lb');
+        if (!r) return;
+        line.textContent = r.pending ? GFX_S.sh.lbPosting : !r.posted ? GFX_S.sh.lbNotPosted
+            : r.rank ? GFX_S.sh.lbRank.replace('{rank}', r.rank) : GFX_S.sh.lbPosted;
+    }
     function postToLeaderboard(total) {
         const line = $('results-lb'), s = session;
         line.hidden = false;
-        line.textContent = GFX_S.sh.lbPosting;
+        lbLine = { pending: true };
+        renderLbLine();
         PF.submitScore(total).then(r => {
             if (session !== s) return;
-            line.textContent = !r.posted ? GFX_S.sh.lbNotPosted
-                : r.rank ? GFX_S.sh.lbRank.replace('{rank}', r.rank) : GFX_S.sh.lbPosted;
+            lbLine = r;
+            renderLbLine();
             refreshLeaderboard();
         });
     }
@@ -1427,7 +1480,7 @@
         // instead of reporting the leaderboard as offline.
         const modeDef = MODES.find(m => m.id === session.mode);
         if (modeDef && !modeDef.ranked) {
-            $('leaderboard-table').innerHTML = '<tr><td>' + modeDef.title + ' rounds are unranked — no leaderboard entry.</td></tr>';
+            $('leaderboard-table').innerHTML = '<tr><td>' + T('{mode} rounds are unranked — no leaderboard entry.', { mode: T(modeDef.title) }) + '</td></tr>';
             return;
         }
         if (platform.hosted) return refreshHostedLeaderboard();
@@ -1435,8 +1488,8 @@
         if (session.mode === 'daily') query.set('day', session.entry.day);
         fetch('/api/v1/scores?' + query).then(r => r.json()).then(j => {
             const t = $('leaderboard-table');
-            if (!j.entries || !j.entries.length) { t.innerHTML = '<tr><td>No validated scores yet — be the first.</td></tr>'; return; }
-            t.innerHTML = '<tr><th>Name</th><th>Score</th><th>Moves</th><th>Time</th></tr>';
+            if (!j.entries || !j.entries.length) { t.innerHTML = '<tr><td>' + T('No validated scores yet — be the first.') + '</td></tr>'; return; }
+            t.innerHTML = '<tr><th>' + T('Name') + '</th><th>' + T('Score') + '</th><th>' + T('Moves') + '</th><th>' + T('Time') + '</th></tr>';
             for (const e of j.entries.slice(0, 10)) {
                 const tr = document.createElement('tr');
                 for (const cell of [String(e.name), String(e.score), String(e.moves), formatTime(e.seconds | 0)]) {
@@ -1456,8 +1509,8 @@
         try {
             const rows = await PF.leaderboardRows(10);
             if (rows) {
-                if (!rows.length) { t.innerHTML = '<tr><td>No entries yet — be the first.</td></tr>'; return; }
-                t.innerHTML = '<tr><th>Rank</th><th>Name</th><th>Score</th></tr>';
+                if (!rows.length) { t.innerHTML = '<tr><td>' + T('No entries yet — be the first.') + '</td></tr>'; return; }
+                t.innerHTML = '<tr><th>' + T('Rank') + '</th><th>' + T('Name') + '</th><th>' + T('Score') + '</th></tr>';
                 for (const e of rows) {
                     const tr = document.createElement('tr');
                     for (const cell of [String(e.rank), e.name, String(e.score)]) {
@@ -1477,8 +1530,8 @@
         const t = $('leaderboard-table');
         const best = progress.bestScores[boardKey(session.mode, session.entry)];
         t.innerHTML = '<tr><td>' + (best != null
-            ? 'Personal best: ' + best + ' — global board unavailable for this round.'
-            : 'Leaderboard offline — playing locally.') + '</td></tr>';
+            ? T('Personal best: {score} — global board unavailable for this round.', { score: best })
+            : T('Leaderboard offline — playing locally.')) + '</td></tr>';
     }
 
     function submitScore() {
@@ -1486,7 +1539,7 @@
         // hosted play submits under the account nickname; local dev keeps the name field
         const name = platform.hosted
             ? (platform.nickname || PF.fallbackName(PF.sub))
-            : ($('submit-name').value.trim() || 'Guest');
+            : ($('submit-name').value.trim() || T('Guest'));
         const body = {
             name, mode: session.mode === 'score' ? 'score' : session.mode,
             day: session.entry.day || todayKey(),
@@ -1494,19 +1547,19 @@
             commands: session.commands, score: session.finalScore.total,
             seconds: sessionElapsedSec(), hints: session.hintsUsed, invalid: session.invalidCount,
         };
-        $('submit-status').textContent = 'Validating…';
+        $('submit-status').textContent = T('Validating…');
         const headers = { 'content-type': 'application/json' };
         fetch('/api/v1/scores', { method: 'POST', headers, body: JSON.stringify(body) })
             .then(async r => {
                 const j = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(j.error || 'rejected');
-                $('submit-status').textContent = 'Score accepted (validated server-side).';
+                $('submit-status').textContent = T('Score accepted (validated server-side).');
                 refreshLeaderboard();
             })
             .catch(e => {
                 $('submit-status').textContent = platform.hosted
-                    ? 'Validation server unavailable — score kept locally and in your account cloud save.'
-                    : 'Submit failed: ' + e.message;
+                    ? T('Validation server unavailable — score kept locally and in your account cloud save.')
+                    : T('Submit failed: {reason}', { reason: e.message });
             });
     }
 
@@ -1576,7 +1629,7 @@
             const v = session.state.vehicles[session.selected];
             const map = v.ori === 'h' ? { left: -1, right: 1 } : { up: -1, down: 1 };
             if (map[act] !== undefined) executeMove(session.selected, map[act], 1, 'k' + (++cmdCounter));
-            else { A.playSfx('invalid'); announce('That vehicle only moves ' + (v.ori === 'h' ? 'left and right' : 'up and down') + '.'); }
+            else { A.playSfx('invalid'); announce(v.ori === 'h' ? T('That vehicle only moves left and right.') : T('That vehicle only moves up and down.')); }
         } else if (act === 'undo') undoMove();
         else if (act === 'hint') requestHint();
         else if (act === 'restart') restartRound();
@@ -1608,7 +1661,7 @@
     // ================= pause / lifecycle =================
     function pauseGame() {
         if (appState !== 'active') return;
-        setAppState('paused', 'Paused.');
+        setAppState('paused', T('Paused.'));
         A.playSfx('pause');
         A.suspendAll();
         openOverlay('overlay-pause');
@@ -1616,7 +1669,7 @@
     function resumeGame() {
         if (!session) return leaveRound();
         closeAllOverlays();
-        setAppState('active', 'Resumed.');
+        setAppState('active', T('Resumed.'));
         A.startMusic();
         A.startAmbience();
         session.lastTick = performance.now();
@@ -1624,13 +1677,13 @@
     function restartRound() {
         if (!session) return;
         if (session.mode === 'practice') session.practiceAttempt = session.practiceAttempt || 0;
-        beginRound(session.mode, session.entry, 'Round restarted.');
+        beginRound(session.mode, session.entry, T('Round restarted.'));
     }
     function leaveRound() {
         closeAllOverlays();
         A.suspendAll();
         session = null;
-        setAppState('mode-select', 'Choose a mode.');
+        setAppState('mode-select', T('Choose a mode.'));
         buildModeList();
     }
 
@@ -1640,7 +1693,7 @@
 
     // ================= buttons =================
     function on(id, fn) { $(id).addEventListener('click', () => { A.playSfx('click'); fn(); }); }
-    on('btn-play', () => { buildModeList(); setAppState('mode-select', 'Choose a mode.'); });
+    on('btn-play', () => { buildModeList(); setAppState('mode-select', T('Choose a mode.')); });
     on('btn-daily', () => startDaily());
     on('btn-journey-resume', () => startJourney(progress.journeyUnlocked));
     on('btn-settings', () => openOverlay('overlay-settings'));
@@ -1652,11 +1705,13 @@
         try { await navigator.clipboard.writeText(link); toast(SH_S.copied); }
         catch (e) { toast(SH_S.copyFailed); }
     });
-    const SH_S = G.strings(G.pickLocale(navigator.language)).sh;
-    for (const [id, key] of [['btn-sh-signin', 'signIn'], ['btn-sh-invite', 'invite']]) {
-        $(id).textContent = SH_S[key];
-        $(id).lang = G.pickLocale(navigator.language);
+    // Graphics / StarHermit strings (gfx.js tables) follow the game language.
+    let GFX_S = G.strings(G.pickLocale(I.lang()));
+    let SH_S = GFX_S.sh;
+    function labelAccountButtons() {
+        for (const [id, key] of [['btn-sh-signin', 'signIn'], ['btn-sh-invite', 'invite']]) $(id).textContent = SH_S[key];
     }
+    labelAccountButtons();
     refreshAccount();
     on('btn-modes-back', () => setAppState('title'));
     on('btn-setup-back', () => setAppState('mode-select'));
@@ -1717,20 +1772,30 @@
     $('opt-mute').addEventListener('change', e => { settings.muted = e.target.checked; A.setMuted(settings.muted); saveSettings(); });
 
     // ================= Graphics settings panel =================
-    const GFX_S = G.strings(G.pickLocale(navigator.language));
     const tierName = t => GFX_S.tiers[t] || t;
     function applyGraphics() {
         render.setGraphics(settings.graphics);
         syncGraphicsUi();
         saveSettings();
     }
-    function buildGraphicsPanel() {
+    // Static Graphics labels; re-run on a language change (the panel itself is not rebuilt).
+    function labelGraphicsPanel() {
         $('gfx-h').textContent = GFX_S.graphics;
         $('gfx-l-preset').textContent = GFX_S.quality;
         $('gfx-l-scale').textContent = GFX_S.renderScale;
         $('gfx-l-adaptive').textContent = GFX_S.adaptive;
         $('gfx-l-fps').textContent = GFX_S.showFps;
         $('gfx-note').textContent = GFX_S.postFailed;
+        for (const o of $('gfx-preset').options) if (o.value !== 'auto') o.textContent = tierName(o.value);
+        for (const cat of Object.keys(G.CATEGORIES)) {
+            const sel = $('gfx-' + cat);
+            if (!sel) continue;
+            sel.previousElementSibling.textContent = GFX_S.cats[cat];
+            for (const o of sel.options) if (o.value !== 'preset') o.textContent = tierName(o.value);
+        }
+    }
+    function buildGraphicsPanel() {
+        labelGraphicsPanel();
         const presetSel = $('gfx-preset');
         for (const p of ['auto'].concat(G.PRESETS)) {
             const o = document.createElement('option');
@@ -1795,7 +1860,7 @@
     buildGraphicsPanel();
     syncGraphicsUi();
     const themeSel = $('opt-theme');
-    C.THEMES.forEach(t => { const o = document.createElement('option'); o.value = t.id; o.textContent = t.name; themeSel.appendChild(o); });
+    C.THEMES.forEach(t => { const o = document.createElement('option'); o.value = t.id; o.textContent = T(t.name); themeSel.appendChild(o); });
     themeSel.addEventListener('change', e => { settings.theme = e.target.value; render.applyTheme(); saveSettings(); });
     $('opt-reduced-motion').addEventListener('change', e => { settings.reducedMotion = e.target.checked; applySettingsToDom(); saveSettings(); });
     $('opt-high-contrast').addEventListener('change', e => { settings.highContrast = e.target.checked; applySettingsToDom(); saveSettings(); });
@@ -1817,7 +1882,7 @@
             const s = sessionElapsedSec();
             if (s !== hudSecond) { hudSecond = s; ui.refreshHud(); }
             const lim = session.entry.challenge;
-            if (lim && lim.timeLimit && s >= lim.timeLimit && !session.over) endRound(false, 'Time ran out');
+            if (lim && lim.timeLimit && s >= lim.timeLimit && !session.over) endRound(false, N('Time ran out'));
         } else if (session) session.lastTick = now;
         pollGamepad();
         if (document.visibilityState === 'visible' && ['active', 'paused', 'resolving', 'results'].includes(appState)) {
@@ -1827,6 +1892,25 @@
 
     window.addEventListener('resize', () => render.resize());
     window.addEventListener('orientationchange', () => setTimeout(() => render.resize(), 60));
+
+    // ================= language =================
+    // Live switching (sh-language.js → PARKWISE_I18N): markup re-applies itself;
+    // everything built in code re-renders here without touching the round.
+    I.onChange(() => {
+        if (captionKey) $('caption-line').textContent = T(captionKey);
+        GFX_S = G.strings(G.pickLocale(I.lang()));
+        SH_S = GFX_S.sh;
+        labelAccountButtons();
+        labelGraphicsPanel();
+        syncGraphicsUi();
+        Array.from(themeSel.options).forEach((o, i) => { o.textContent = T(C.THEMES[i].name); });
+        renderKeyHelp();
+        renderProfileLine();
+        if (appState === 'mode-select') buildModeList();
+        if (appState === 'preparing' && setupMode) openSetup(setupMode, true);
+        if (session) ui.refreshAll();
+        if (appState === 'results') renderResultsText();
+    });
 
     // ================= boot =================
     function boot() {

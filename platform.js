@@ -7,7 +7,8 @@
 // - Account display name from the profile (nickname, never /api/v1/me);
 //   "Player " + id prefix fallback.
 // - Mirrors the settings+progress doc into the `game:<slug>` cloud-save slot
-//   (remote-preferred on load); localStorage stays the offline cache.
+//   (merged with local progress on load and after a saveconflict, in
+//   main.js); localStorage stays the offline cache.
 // - Per-player settings KV, keyboard bindings, sign-in and the invite link.
 // - Hosted leaderboards are read-only (the game's first platform board).
 // When no token was read the game stays in local mode and never calls the API.
@@ -20,7 +21,9 @@
     const isHosted = () => !!(SH && SH.signedIn && SH.slug);
 
     function fallbackName(userId) {
-        return 'Player ' + String(userId || 'unknown').slice(0, 6);
+        const I = root.PARKWISE_I18N;
+        const id = String(userId || 'unknown').slice(0, 6);
+        return I ? I.T('Player {id}', { id }) : 'Player ' + id;
     }
     async function displayName(userId) {
         if (!isHosted() || !userId) return fallbackName(userId);
@@ -107,6 +110,31 @@
         if (!isHosted()) return copy;
         try { return await SH.loadBindings(defaults); } catch (e) { return copy; }
     }
+    // Progress from two devices: the better record of each, nothing dropped.
+    function mergeProgress(remote, local) {
+        const a = remote || {}, b = local || {};
+        const out = Object.assign({}, a, b);
+        out.journeyUnlocked = Math.max(a.journeyUnlocked || 0, b.journeyUnlocked || 0);
+        out.wins = Math.max(a.wins || 0, b.wins || 0);
+        out.winStreak = Math.max(a.winStreak || 0, b.winStreak || 0);
+        out.stars = Object.assign({}, a.stars);
+        for (const [k, v] of Object.entries(b.stars || {})) out.stars[k] = Math.max(out.stars[k] || 0, v || 0);
+        out.tutorialsDone = Array.from(new Set([].concat(a.tutorialsDone || [], b.tutorialsDone || [])));
+        out.achievements = Object.assign({}, a.achievements);
+        for (const [k, v] of Object.entries(b.achievements || {})) out.achievements[k] = out.achievements[k] ? Math.min(out.achievements[k], v) : v;
+        out.dailiesDone = Object.assign({}, a.dailiesDone);
+        for (const [k, v] of Object.entries(b.dailiesDone || {})) out.dailiesDone[k] = Math.max(out.dailiesDone[k] || 0, v || 0);
+        out.lastDaily = [a.lastDaily, b.lastDaily].filter(Boolean).sort().pop() || null;
+        out.bestScores = Object.assign({}, a.bestScores);
+        for (const [k, v] of Object.entries(b.bestScores || {})) out.bestScores[k] = Math.max(out.bestScores[k] || 0, v || 0);
+        return out;
+    }
+    // A cloud write lost to a save made on another device (the SDK refuses it and
+    // blocks writes until the slot is re-read): main.js re-reads and merges.
+    let conflictCb = null;
+    if (SH) SH.on('saveconflict', () => { if (conflictCb) conflictCb(); });
+    function onSaveConflict(cb) { conflictCb = cb; }
+
     function onAuth(cb) {
         if (!SH) return;
         let was = isHosted();
@@ -128,7 +156,7 @@
         avatarUrl() { return isHosted() ? SH.avatarUrl() : Promise.resolve(null); },
         cloudStart, cloudDirty, cloudFlush, cloudLoad,
         leaderboardRows, submitScore,
-        getSettings, patchSettings, loadBindings, onAuth,
+        getSettings, patchSettings, loadBindings, onAuth, onSaveConflict, mergeProgress,
         canSignIn() { return !!(SH && SH.canSignIn()); },
         signIn() { return !!(SH && SH.signIn()); },
         inviteLink() { return isHosted() ? SH.inviteLink() : null; },

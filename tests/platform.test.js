@@ -14,14 +14,25 @@ const token = 'h.' + b64u({ sub: 'user-123456', game_scope: 'pw-slug', exp: Math
 const unrefTimeout = (f, ms) => { const t = setTimeout(f, ms); t.unref(); return t; };
 
 function fakeServer() {
-  const calls = [], saves = {}, kv = {};
+  const calls = [], saves = {}, kv = {}, etags = {};
+  let version = 0;
   const fetch = async (url, init = {}) => {
     const method = init.method || 'GET';
     calls.push([method, url]);
     const r = (status, body) => new Response(body == null ? null : body, { status });
     if (url.includes('/cloud-saves/')) {
-      const key = decodeURIComponent(url.split('/cloud-saves/')[1]);
-      if (method === 'PUT') { saves[key] = Buffer.from(JSON.parse(init.body).dataBase64, 'base64'); return r(200, '{}'); }
+      // Conditional writes like the platform: If-Match / If-None-Match after a
+      // load, 412 with the current etag when stale, { etag } on success.
+      const tail = decodeURIComponent(url.split('/cloud-saves/')[1]);
+      const key = tail.replace(/\/info$/, '');
+      const h = new Headers(init.headers || {});
+      if (tail.endsWith('/info')) return r(200, JSON.stringify(saves[key] ? { exists: true, etag: etags[key] } : { exists: false }));
+      if (method === 'PUT') {
+        if ((h.get('If-Match') && h.get('If-Match') !== etags[key]) || (h.get('If-None-Match') === '*' && saves[key])) return r(412, JSON.stringify({ etag: etags[key] || null }));
+        saves[key] = Buffer.from(JSON.parse(init.body).dataBase64, 'base64');
+        etags[key] = '"v' + (++version) + '"';
+        return r(200, JSON.stringify({ etag: etags[key] }));
+      }
       return saves[key] ? r(200, saves[key]) : r(404);
     }
     if (url.endsWith('/profile')) return r(200, JSON.stringify({ username: 'u', nickname: 'Tess' }));
@@ -30,7 +41,7 @@ function fakeServer() {
     if (url.endsWith('/controls')) return r(200, JSON.stringify({ actions: [{ action: 'hint', codes: ['KeyJ'] }] }));
     return r(404);
   };
-  return { calls, saves, kv, fetch };
+  return { calls, saves, kv, etags, fetch, bump(key) { etags[key] = '"v' + (++version) + '"'; } };
 }
 
 // Load platform.js fresh into a fake browser global.
@@ -97,4 +108,45 @@ test('standalone: no token means no fetch at all', async () => {
   assert.equal(P.canSignIn(), false);
   await tick();
   assert.equal(srv.calls.length, 0);
+});
+
+test('sign-in is offered on a StarHermit UUID host without a token', () => {
+  const srv = fakeServer();
+  const win = loadPlatform('', srv, '0b9d6f2e-3c4a-4e5b-9a7c-1d2e3f405162.starhermit.com');
+  assert.equal(win.PARKWISE_PLATFORM.canSignIn(), true);
+});
+
+test('cloud-save conflict: a write that lost to another device is reported, re-read and merged', async () => {
+  const srv = fakeServer();
+  const win = loadPlatform('#game_token=' + token, srv, 'pw-slug.starhermit.com');
+  const P = win.PARKWISE_PLATFORM;
+  let doc = { savedAt: 1, settings: {}, progress: { wins: 1, journeyUnlocked: 2, stars: { 'j-1': 2 } } };
+  P.cloudStart(() => doc);
+  P.cloudFlush();
+  await tick();
+  await P.cloudLoad(); // writes are conditional on this version from now on
+  // Another device saves a newer document.
+  const other = { savedAt: 2, settings: {}, progress: { wins: 6, journeyUnlocked: 5, stars: { 'j-1': 1, 'j-4': 3 }, achievements: { first: 100 } } };
+  srv.saves['game:pw-slug'] = Buffer.from(await win.StarHermit._zip('save.json', new TextEncoder().encode(JSON.stringify(other))));
+  srv.bump('game:pw-slug');
+  let conflicts = 0;
+  P.onSaveConflict(() => { conflicts++; });
+  doc = { savedAt: 3, settings: {}, progress: { wins: 2, journeyUnlocked: 3, stars: { 'j-1': 3 }, tutorialsDone: ['t1'], achievements: { first: 50 } } };
+  P.cloudFlush();
+  await tick();
+  assert.equal(conflicts, 1);
+  const remote = await P.cloudLoad();
+  assert.equal(remote.progress.wins, 6); // the other device's write survived
+  const merged = P.mergeProgress(remote.progress, doc.progress);
+  assert.equal(merged.wins, 6);
+  assert.equal(merged.journeyUnlocked, 5);
+  assert.deepEqual(merged.stars, { 'j-1': 3, 'j-4': 3 });
+  assert.deepEqual(merged.tutorialsDone, ['t1']);
+  assert.equal(merged.achievements.first, 50); // earliest unlock time
+  doc = { savedAt: 4, settings: {}, progress: merged };
+  P.cloudFlush();
+  await tick();
+  const back = await P.cloudLoad();
+  assert.equal(back.progress.wins, 6);
+  assert.deepEqual(back.progress.tutorialsDone, ['t1']);
 });
