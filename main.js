@@ -425,7 +425,7 @@
         renderer.toneMappingExposure = 1.05;
         renderer.shadowMap.type = THREE.PCFShadowMap;
 
-        // ---- GPU detection → Auto preset (software renderers get Low; touch devices cap at Balanced)
+        // ---- GPU detection → hardware level → Auto preset
         const gl = renderer.getContext();
         let gpu = '';
         try {
@@ -437,8 +437,16 @@
         } catch (e) { /* renderer string masked */ }
         const coarse = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches);
         const mobile = coarse || /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || '');
-        const detected = G.autoPreset(gpu, mobile);
-        let q = G.resolve(settings.graphics, detected);
+        // StarHermit hardware level (gpu-level.js): renderer string + device facts (phone/tablet, cores,
+        // memory, screen).
+        let sys = { mobile, webgl2: renderer.capabilities.isWebGL2 };
+        try {
+            const SG = window.StarHermitGpu;
+            if (SG) { const d = SG.detectSystem(); sys = { mobile: mobile || d.mobile, webgl2: sys.webgl2, touch: d.touch, screen: d.screen, cores: d.cores, memoryGb: d.memoryGb, astc: d.astc }; }
+        } catch (e) { /* defaults */ }
+        const gpuLevel = G.detectLevel(gpu, sys);
+        const detected = G.presetForLevel(gpuLevel);
+        let q = G.resolve(settings.graphics, detected, gpuLevel);
 
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 200);
@@ -490,6 +498,7 @@
         let exitGate = null;
         let theme = C.THEMES[0];
         let vfx = []; // pooled celebration particles
+        let confettiMats = [];
         let ambient = null; // detailed-scene animated bits: chevrons, beacon, dust
         let builtWith = null; // detail|particles the current board was built with
         const avRng = R.rng(1234); // audiovisual variant stream (never rules)
@@ -515,18 +524,22 @@
         }
 
         // ---- shared procedural textures (built once, never disposed with the board)
+        // `px` (the preset's texture budget) draws the authored size-pixel texture into px × px.
         const texCache = {};
-        function canvasTexture(name, size, draw, repeat) {
-            if (texCache[name]) return texCache[name];
+        function canvasTexture(name, size, draw, repeat, px) {
+            const key = name + (px ? '@' + px : '');
+            if (texCache[key]) return texCache[key];
             const cv = document.createElement('canvas');
-            cv.width = size[0]; cv.height = size[1];
-            draw(cv.getContext('2d'), size[0], size[1], R.rng(0x5EED + name.length * 97));
+            cv.width = px || size[0]; cv.height = px ? Math.round(px * size[1] / size[0]) : size[1];
+            const ctx = cv.getContext('2d');
+            ctx.scale(cv.width / size[0], cv.height / size[1]);
+            draw(ctx, size[0], size[1], R.rng(0x5EED + name.length * 97));
             const t = new THREE.CanvasTexture(cv);
             t.colorSpace = THREE.SRGBColorSpace;
             t.wrapS = t.wrapT = THREE.RepeatWrapping;
             if (repeat) t.repeat.set(repeat, repeat);
             t.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
-            texCache[name] = t;
+            texCache[key] = t;
             return t;
         }
         // near-white grain so the theme colour still reads as the surface colour
@@ -544,12 +557,12 @@
                 ctx.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 1.5, 1 + rnd() * 1.5);
             }
         }
-        const asphaltTex = () => canvasTexture('asphalt', [256, 256], (c, w, h, r) => speckle(c, w, h, r, '#f0f0f0', 5200, 26), 3);
+        const asphaltTex = () => canvasTexture('asphalt', [256, 256], (c, w, h, r) => speckle(c, w, h, r, '#f0f0f0', 5200, 26), 3, q.budget.texture);
         const concreteTex = () => canvasTexture('concrete', [256, 256], (c, w, h, r) => {
             speckle(c, w, h, r, '#f4f4f4', 1800, 40);
             c.strokeStyle = 'rgba(0,0,0,0.12)'; c.lineWidth = 2;
             for (let p = 0; p <= w; p += 64) { c.beginPath(); c.moveTo(p, 0); c.lineTo(p, h); c.moveTo(0, p); c.lineTo(w, p); c.stroke(); }
-        }, 2);
+        }, 2, q.budget.texture);
         const windowTex = () => canvasTexture('windows', [64, 128], (c, w, h, r) => {
             c.fillStyle = '#000'; c.fillRect(0, 0, w, h);
             for (let y = 6; y < h - 6; y += 10) for (let x = 5; x < w - 5; x += 9) {
@@ -566,27 +579,47 @@
             s.lineTo(hx, hz - r); s.quadraticCurveTo(hx, hz, hx - r, hz);
             s.lineTo(-hx + r, hz); s.quadraticCurveTo(-hx, hz, -hx, hz - r);
             s.lineTo(-hx, -hz + r); s.quadraticCurveTo(-hx, -hz, -hx + r, -hz);
-            const g = new THREE.ExtrudeGeometry(s, { depth: Math.max(0.01, h - 2 * bevel), bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3, curveSegments: 5 });
+            const g = new THREE.ExtrudeGeometry(s, { depth: Math.max(0.01, h - 2 * bevel), bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: q.budget.bevel, curveSegments: q.budget.curve });
             g.rotateX(-Math.PI / 2);
             g.translate(0, bevel, 0);
             return g;
+        }
+
+        // Lit materials per the preset's budget: Lambert on Low (emissive kept), Standard on Balanced,
+        // and Physical (clear-coated paint and glass) only on High/Ultra. Shared ones are cached per board
+        // build, so every vehicle reuses the same glass, tyre, light and stripe materials.
+        function lit(params, physical) {
+            const tier = q.budget.material;
+            if (tier === 'lambert') {
+                const keep = {};
+                for (const k of ['color', 'emissive', 'emissiveIntensity', 'emissiveMap', 'map', 'side', 'transparent', 'opacity']) if (params[k] !== undefined) keep[k] = params[k];
+                return new THREE.MeshLambertMaterial(keep);
+            }
+            if (physical && tier === 'physical') return new THREE.MeshPhysicalMaterial(params);
+            const { clearcoat, clearcoatRoughness, ...rest } = params;
+            return new THREE.MeshStandardMaterial(rest);
+        }
+        let sharedMats = null;
+        function shared(name, make) {
+            sharedMats = sharedMats || {};
+            return sharedMats[name] || (sharedMats[name] = make());
         }
 
         function makeVehicleMesh(v, isTarget, colorHex) {
             if (q.detail === 'detailed') return makeDetailedVehicle(v, isTarget, colorHex);
             const grp = new THREE.Group();
             const L = v.len * CELL * 0.92, W = CELL * 0.72, H = 0.5;
-            const mat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.45, metalness: 0.25 });
+            const mat = lit({ color: colorHex, roughness: 0.45, metalness: 0.25 });
             const body = new THREE.Mesh(new THREE.BoxGeometry(v.ori === 'h' ? L : W, H, v.ori === 'h' ? W : L), mat);
             body.position.y = H / 2 + 0.12;
             body.castShadow = true;
             grp.add(body);
-            const cabMat = new THREE.MeshStandardMaterial({ color: 0x223044, roughness: 0.2, metalness: 0.4 });
+            const cabMat = shared('cab', () => lit({ color: 0x223044, roughness: 0.2, metalness: 0.4 }));
             const cab = new THREE.Mesh(new THREE.BoxGeometry(v.ori === 'h' ? L * 0.42 : W * 0.8, 0.32, v.ori === 'h' ? W * 0.8 : L * 0.42), cabMat);
             cab.position.y = H + 0.28;
             grp.add(cab);
             const wheelGeo = new THREE.CylinderGeometry(0.16, 0.16, 0.12, 10);
-            const wheelMat = new THREE.MeshStandardMaterial({ color: 0x15181d, roughness: 0.9 });
+            const wheelMat = shared('wheel', () => lit({ color: 0x15181d, roughness: 0.9 }));
             const offs = v.ori === 'h' ? [[-L / 2 + 0.35, -W / 2], [L / 2 - 0.35, -W / 2], [-L / 2 + 0.35, W / 2], [L / 2 - 0.35, W / 2]]
                 : [[-W / 2, -L / 2 + 0.35], [W / 2, -L / 2 + 0.35], [-W / 2, L / 2 - 0.35], [W / 2, L / 2 - 0.35]];
             for (const [ox, oz] of offs) {
@@ -597,7 +630,7 @@
                 grp.add(w);
             }
             if (isTarget) {
-                const glowMat = new THREE.MeshStandardMaterial({ color: colorHex, emissive: colorHex, emissiveIntensity: 0.35, roughness: 0.4 });
+                const glowMat = lit({ color: colorHex, emissive: colorHex, emissiveIntensity: 0.35, roughness: 0.4 });
                 body.material = glowMat;
             }
             grp.layers.set(LAYER_GAME);
@@ -613,14 +646,14 @@
             if (v.ori === 'v') car.rotation.y = -Math.PI / 2;
             grp.add(car);
             const L = v.len * CELL * 0.92, W = CELL * 0.72, CL = 0.13;
-            const paint = new THREE.MeshPhysicalMaterial({
+            const paint = lit({
                 color: colorHex, roughness: 0.4, metalness: 0.15, clearcoat: 0.7, clearcoatRoughness: 0.1,
                 emissive: isTarget ? colorHex : 0x000000, emissiveIntensity: isTarget ? 0.22 : 0,
-            });
-            const glass = new THREE.MeshPhysicalMaterial({ color: 0x16202c, roughness: 0.06, metalness: 0.3, clearcoat: 1, clearcoatRoughness: 0.03 });
-            const rubber = new THREE.MeshStandardMaterial({ color: 0x14171b, roughness: 0.85 });
-            const head = new THREE.MeshStandardMaterial({ color: 0xfff4dc, emissive: 0xfff1d0, emissiveIntensity: 1.5 });
-            const tail = new THREE.MeshStandardMaterial({ color: 0xff3b30, emissive: 0xff2a1a, emissiveIntensity: 1.8 });
+            }, true);
+            const glass = shared('glass', () => lit({ color: 0x16202c, roughness: 0.06, metalness: 0.3, clearcoat: 1, clearcoatRoughness: 0.03 }, true));
+            const rubber = shared('rubber', () => lit({ color: 0x14171b, roughness: 0.85 }));
+            const head = shared('head', () => lit({ color: 0xfff4dc, emissive: 0xfff1d0, emissiveIntensity: 1.5 }));
+            const tail = shared('tail', () => lit({ color: 0xff3b30, emissive: 0xff2a1a, emissiveIntensity: 1.8 }));
             const add = (geo, mat, x, y, z, cast) => {
                 const m = new THREE.Mesh(geo, mat);
                 m.position.set(x, y, z);
@@ -642,17 +675,16 @@
                 bodyTop = CL + 0.42;
             }
             // axles: one cylinder per axle, tyres peek out at both sides
-            const axle = new THREE.CylinderGeometry(0.17, 0.17, W * 0.98, 16);
-            axle.rotateX(Math.PI / 2);
+            const axle = shared('axle', () => new THREE.CylinderGeometry(0.17, 0.17, W * 0.98, 16).rotateX(Math.PI / 2));
             add(axle, rubber, L / 2 - 0.42, 0.17, 0, true);
             add(axle, rubber, -L / 2 + 0.42, 0.17, 0, true);
             // light bars: warm head lights at the front, red tail lights at the back (bloom sources)
-            const bar = new THREE.BoxGeometry(0.05, 0.07, W * 0.72);
+            const bar = shared('bar', () => new THREE.BoxGeometry(0.05, 0.07, W * 0.72));
             add(bar, head, L / 2 - 0.01, CL + 0.26, 0);
             add(bar, tail, -L / 2 + 0.01, CL + 0.3, 0);
             if (isTarget) {
                 // white racing stripe: the target reads by shape, not colour alone
-                const stripeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
+                const stripeMat = shared('stripe', () => lit({ color: 0xffffff, roughness: 0.4 }));
                 add(new THREE.BoxGeometry(L * 0.9, 0.012, 0.16), stripeMat, 0, bodyTop + 0.004, 0);
                 if (v.len < 3) add(new THREE.BoxGeometry(L * 0.4, 0.012, 0.16), stripeMat, -L * 0.06, CL + 0.724, 0);
             }
@@ -664,13 +696,13 @@
         // Distant city blocks under the rooftop (one instanced draw), fogged into the sky.
         function buildSkyline(group) {
             const rnd = R.rng(0xC17E);
-            const N = 46;
-            const facade = new THREE.MeshStandardMaterial({
+            const N = q.budget.skyline;
+            const facade = lit({
                 color: new THREE.Color(theme.fog).lerp(new THREE.Color(0x2a3444), 0.55), roughness: 0.9,
                 emissive: 0xffe2b0, emissiveMap: windowTex(),
                 emissiveIntensity: theme.id === 'night' ? 1.3 : theme.id === 'dusk' || theme.id === 'contrast' ? 0.6 : 0.12,
             });
-            const roof = new THREE.MeshStandardMaterial({ color: new THREE.Color(theme.fog).multiplyScalar(0.42), roughness: 0.95 });
+            const roof = lit({ color: new THREE.Color(theme.fog).multiplyScalar(0.42), roughness: 0.95 });
             const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), [facade, facade, roof, roof, facade, facade], N);
             const m = new THREE.Matrix4(), p = new THREE.Vector3(), s = new THREE.Vector3(), qq = new THREE.Quaternion();
             for (let i = 0; i < N; i++) {
@@ -687,8 +719,8 @@
 
         function buildDetailedProps(group, half, size, exZ) {
             const deco = R.rng((session ? session.entry.seed : 1) ^ 0xDEC0);
-            const metal = new THREE.MeshStandardMaterial({ color: 0x7b8594, roughness: 0.45, metalness: 0.6 });
-            const dark = new THREE.MeshStandardMaterial({ color: 0x2a3038, roughness: 0.6, metalness: 0.4 });
+            const metal = lit({ color: 0x7b8594, roughness: 0.45, metalness: 0.6 });
+            const dark = lit({ color: 0x2a3038, roughness: 0.6, metalness: 0.4 });
             const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; group.add(m); return m; };
             // seeded rooftop props: AC units with fan grilles and round vents
             for (let i = 0; i < 7; i++) {
@@ -707,18 +739,18 @@
                 }
             }
             // lamp posts at two corners (warm heads bloom at dusk/night)
-            const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff3d6, emissive: 0xffe0a8, emissiveIntensity: 2.6 });
+            const lampMat = lit({ color: 0xfff3d6, emissive: 0xffe0a8, emissiveIntensity: 2.6 });
             for (const [lx, lz] of [[-half - 1.5, -half - 1.5], [half + 1.5, half + 1.5]]) {
                 add(new THREE.CylinderGeometry(0.05, 0.07, 2.4, 10), dark, lx, 1.2, lz);
                 add(new THREE.BoxGeometry(0.5, 0.08, 0.22), lampMat, lx + (lx < 0 ? 0.2 : -0.2), 2.42, lz);
             }
             // antenna mast with a blinking beacon
             add(new THREE.CylinderGeometry(0.03, 0.05, 3.1, 8), metal, half + 1.6, 1.55, -half - 1.6);
-            const beaconMat = new THREE.MeshStandardMaterial({ color: 0xff4040, emissive: 0xff2020, emissiveIntensity: 3 });
+            const beaconMat = lit({ color: 0xff4040, emissive: 0xff2020, emissiveIntensity: 3 });
             const beacon = add(new THREE.SphereGeometry(0.08, 12, 8), beaconMat, half + 1.6, 3.15, -half - 1.6);
             beacon.castShadow = false;
             // exit gate: bollards and animated chevrons pointing out of the lot
-            const bollard = new THREE.MeshStandardMaterial({ color: 0xffc107, roughness: 0.5 });
+            const bollard = lit({ color: 0xffc107, roughness: 0.5 });
             add(new THREE.CylinderGeometry(0.09, 0.09, 0.55, 12), bollard, half + 0.55, 0.28, exZ - CELL * 0.52);
             add(new THREE.CylinderGeometry(0.09, 0.09, 0.55, 12), bollard, half + 0.55, 0.28, exZ + CELL * 0.52);
             const chev = new THREE.Shape();
@@ -727,7 +759,7 @@
             chevGeo.rotateX(-Math.PI / 2);
             const chevrons = [];
             for (let i = 0; i < 3; i++) {
-                const mat = new THREE.MeshStandardMaterial({ color: 0x9dffd0, emissive: 0x3dffa0, emissiveIntensity: 1.2 });
+                const mat = lit({ color: 0x9dffd0, emissive: 0x3dffa0, emissiveIntensity: 1.2 });
                 const m = new THREE.Mesh(chevGeo, mat);
                 m.position.set(half + 0.45 + i * 0.36, 0.125, exZ);
                 group.add(m);
@@ -736,7 +768,7 @@
             // drifting dust motes (cosmetic, environment layer, never picked)
             let dust = null;
             if (q.particles === 'high') {
-                const n = 110, pos = new Float32Array(n * 3), prnd = R.rng(0xD057);
+                const n = q.budget.dust, pos = new Float32Array(n * 3), prnd = R.rng(0xD057);
                 for (let i = 0; i < n; i++) { pos[i * 3] = (prnd() - 0.5) * 15; pos[i * 3 + 1] = 0.3 + prnd() * 4; pos[i * 3 + 2] = (prnd() - 0.5) * 15; }
                 const geo = new THREE.BufferGeometry();
                 geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -748,12 +780,15 @@
 
         function buildBoard(entry) {
             disposeGroup(boardGroup);
-            for (const p of vfx) { p.m.geometry.dispose(); p.m.material.dispose(); }
+            for (const p of vfx) p.m.geometry.dispose();
+            for (const m of confettiMats) m.dispose();
+            confettiMats = [];
             vfx = [];
             vehicleViews = [];
             markerMeshes = [];
             ambient = null;
-            builtWith = q.detail + '|' + q.particles;
+            builtWith = boardKey();
+            sharedMats = null; // the previous board's shared materials were disposed with its group
             const detailed = q.detail === 'detailed';
             boardGroup = new THREE.Group();
             scene.add(boardGroup);
@@ -767,13 +802,13 @@
             const size = R.GRID * CELL;
             // rooftop slab
             const slab = new THREE.Mesh(new THREE.BoxGeometry(size + 4.4, 0.8, size + 4.4),
-                new THREE.MeshStandardMaterial({ color: theme.slab, roughness: 0.95, map: detailed ? concreteTex() : null }));
+                lit({ color: theme.slab, roughness: 0.95, map: detailed ? concreteTex() : null }));
             slab.position.y = -0.4;
             slab.receiveShadow = true;
             boardGroup.add(slab);
             // parking surface
             const lot = new THREE.Mesh(new THREE.BoxGeometry(size + 0.5, 0.1, size + 0.5),
-                new THREE.MeshStandardMaterial({ color: theme.ground, roughness: 0.9, map: detailed ? asphaltTex() : null }));
+                lit({ color: theme.ground, roughness: 0.9, map: detailed ? asphaltTex() : null }));
             lot.position.y = 0.001;
             lot.receiveShadow = true;
             boardGroup.add(lot);
@@ -788,8 +823,8 @@
                 boardGroup.add(h); boardGroup.add(vl);
             }
             // parapet walls with a gap at the exit
-            const wallMat = new THREE.MeshStandardMaterial({ color: theme.parapet, roughness: 0.85, map: detailed ? concreteTex() : null });
-            const capMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(theme.parapet).offsetHSL(0, -0.05, 0.14), roughness: 0.7 });
+            const wallMat = lit({ color: theme.parapet, roughness: 0.85, map: detailed ? concreteTex() : null });
+            const capMat = lit({ color: new THREE.Color(theme.parapet).offsetHSL(0, -0.05, 0.14), roughness: 0.7 });
             const exZ = cellToWorld(0, R.EXIT_ROW).z;
             const mkWall = (w, d, x, z) => {
                 const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.7, d), wallMat);
@@ -814,7 +849,7 @@
             mkWall(0.35, half - exitHalf + 0.35, half + 0.35, exitHalf + (half - exitHalf) / 2);
             // exit gate: glowing ramp marker
             exitGate = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.06, CELL * 0.9),
-                new THREE.MeshStandardMaterial({ color: 0x2f9e6e, emissive: 0x2f9e6e, emissiveIntensity: 0.7 }));
+                lit({ color: 0x2f9e6e, emissive: 0x2f9e6e, emissiveIntensity: 0.7 }));
             exitGate.position.set(half + 0.9, 0.08, exZ);
             boardGroup.add(exitGate);
             if (detailed) {
@@ -823,7 +858,7 @@
             } else {
                 // seeded rooftop props: vents, AC boxes, antenna (visual seed deterministic)
                 const deco = R.rng(entry.seed ^ 0xDEC0);
-                const propMat = new THREE.MeshStandardMaterial({ color: 0x6b7686, roughness: 0.8, metalness: 0.3 });
+                const propMat = lit({ color: 0x6b7686, roughness: 0.8, metalness: 0.3 });
                 for (let i = 0; i < 7; i++) {
                     const pw = 0.4 + deco() * 0.7, ph = 0.3 + deco() * 1.1, pd = 0.4 + deco() * 0.7;
                     const prop = new THREE.Mesh(new THREE.BoxGeometry(pw, ph, pd), propMat);
@@ -936,9 +971,12 @@
         function spawnConfetti() {
             if (settings.reducedMotion || !boardGroup) return;
             const geo = new THREE.BoxGeometry(0.08, 0.08, 0.08);
-            const count = q.particles === 'high' ? 120 : 60;
+            const count = Math.round(q.budget.confetti * (q.particles === 'high' ? 1 : 0.5));
+            // one material per palette colour, shared by every piece (freed when the burst ends)
+            const mats = theme.palette.map(c => new THREE.MeshBasicMaterial({ color: c }));
+            confettiMats.push(...mats);
             for (let i = 0; i < count; i++) {
-                const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: theme.palette[i % theme.palette.length] }));
+                const m = new THREE.Mesh(geo, mats[i % mats.length]);
                 const p = cellToWorld(R.GRID - 1, R.EXIT_ROW);
                 m.position.set(p.x + 0.8, 0.4, p.z);
                 m.userData.vel = new THREE.Vector3((avRng() - 0.2) * 4, avRng() * 5 + 2, (avRng() - 0.5) * 4);
@@ -1014,7 +1052,7 @@
             if (el) el.hidden = !on;
         }
         function setGraphics(saved) {
-            q = G.resolve(saved, detected);
+            q = G.resolve(saved, detected, gpuLevel);
             const mapSize = G.SHADOW_MAP[q.shadows];
             const had = renderer.shadowMap.enabled;
             renderer.shadowMap.enabled = mapSize > 0;
@@ -1032,9 +1070,11 @@
             fpsVisible(q.showFps);
             document.body.dataset.gfxPreset = q.preset;
             canvas.dataset.gfxPreset = q.preset;
-            if (session && boardGroup && builtWith !== q.detail + '|' + q.particles) buildBoard(session.entry);
+            if (session && boardGroup && builtWith !== boardKey()) buildBoard(session.entry);
         }
         function applyQuality() { setGraphics(settings.graphics); }
+        // Board assets depend on these settings and the preset's budget; a change rebuilds the board.
+        function boardKey() { return [q.detail, q.particles, JSON.stringify(q.budget)].join('|'); }
         function applyTheme() { if (session) buildBoard(session.entry); }
 
         function targetRatio() {
@@ -1124,8 +1164,9 @@
                 p.m.position.addScaledVector(p.m.userData.vel, dt);
                 p.m.userData.vel.y -= 9.8 * dt;
                 p.m.rotation.x += dt * 5; p.m.rotation.y += dt * 7;
-                if (p.life <= 0) { boardGroup.remove(p.m); p.m.material.dispose(); vfx.splice(i, 1); }
+                if (p.life <= 0) { boardGroup.remove(p.m); vfx.splice(i, 1); }
             }
+            if (!vfx.length && confettiMats.length) { for (const m of confettiMats) m.dispose(); confettiMats = []; }
             if (exitGate) exitGate.material.emissiveIntensity = moving ? 0.55 + Math.sin(now * 0.004) * 0.2 : 0.6;
             if (ambient) {
                 ambient.chevrons.forEach((c, i) => {
@@ -1144,7 +1185,7 @@
                 }
             }
             applySize(false);
-            const pk = q.post && POST && !postFailed ? [q.ao, q.bloom, q.grade, q.antialias, size[0], size[1], pixelRatio].join('|') : 'none';
+            const pk = q.post && POST && !postFailed ? [q.ao, q.bloom, q.grade, q.antialias, q.budget.aoRes, q.budget.bloomRes, size[0], size[1], pixelRatio].join('|') : 'none';
             if (pk !== postKey) { postKey = pk; buildPost(); }
             if (composer) {
                 try { (globalThis.GameOptions ? globalThis.GameOptions.draw(composer.renderer, () => composer.render(dt)) : composer.render(dt)); return; } catch (e) { postFailed = true; disposeComposer(); if (infoListener) infoListener(); }
@@ -1166,7 +1207,7 @@
         function graphicsInfo() {
             let px = [Math.round(size[0] * pixelRatio), Math.round(size[1] * pixelRatio)];
             if (!px[0]) { const r = targetRatio(); px = [Math.round(window.innerWidth * r), Math.round(window.innerHeight * r)]; }
-            return { gpu, detected, resolved: q, pixels: px, postFailed: postFailed || (postLoadFailed && q.post), fps: Math.round(fps) };
+            return { gpu, level: gpuLevel, detected, resolved: q, pixels: px, postFailed: postFailed || (postLoadFailed && q.post), fps: Math.round(fps) };
         }
         function onInfo(fn) { infoListener = fn; }
 
@@ -1852,7 +1893,7 @@
         $('gfx-adaptive').checked = g.adaptive !== false;
         $('gfx-fps').checked = !!g.show_fps;
         $('gfx-summary').textContent = info
-            ? [info.gpu || GFX_S.gpuUnknown, G.describe(r, info.pixels, GFX_S)].join(' · ')
+            ? [info.gpu || GFX_S.gpuUnknown, info.level != null ? GFX_S.level.replace('{n}', info.level) : null, G.describe(r, info.pixels, GFX_S)].filter(Boolean).join(' · ')
             : GFX_S.postFailed;
         $('gfx-note').hidden = !(info && info.postFailed);
         $('gfx-section').dataset.gfxPreset = r.preset;

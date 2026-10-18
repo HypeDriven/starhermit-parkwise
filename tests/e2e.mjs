@@ -106,6 +106,7 @@ async function playthrough(page, pass) {
     await page.selectOption('#gfx-bloom', 'off');
     const sum = await page.textContent('#gfx-summary');
     if (!/2048² shadows/.test(sum) || /bloom/.test(sum)) throw new Error('high/no-bloom summary: ' + sum);
+    if (!/ · Level 0 · /.test(sum)) throw new Error('summary lacks the hardware level: ' + sum);
     await page.screenshot({ path: SHOT('graphics', pass) });
     await page.reload({ waitUntil: 'load' });
     await page.waitForFunction(() => window.PARKWISE && window.PARKWISE.appState === 'title');

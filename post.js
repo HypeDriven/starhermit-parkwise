@@ -44,6 +44,15 @@ export function makeEnvironment(renderer) {
     return rt.texture;
 }
 
+// Run a post pass at a fraction of the frame: EffectComposer.addPass/setSize hand every pass the full
+// frame size, so the pass's own setSize applies the budget's scale (half-res bloom/GTAO below Ultra).
+function atScale(pass, k) {
+    if (!(k < 1)) return pass;
+    const setSize = pass.setSize.bind(pass);
+    pass.setSize = (w, h) => setSize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+    return pass;
+}
+
 /**
  * Build the post chain: Render → GTAO → Bloom → Grade → Output → SMAA/FXAA.
  * `g` is the resolved quality; `msaa` asks for a multisampled scene target.
@@ -62,10 +71,10 @@ export function buildComposer(renderer, scene, camera, g, w, h, ratio, msaa) {
         const hi = g.ao === 'high';
         ao.updateGtaoMaterial({ radius: 0.45, distanceExponent: 1.4, thickness: 1.0, scale: 1.0, samples: hi ? 16 : 8 });
         ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: hi ? 6 : 4, rings: 2, samples: hi ? 16 : 8 });
-        composer.addPass(ao);
+        composer.addPass(atScale(ao, g.budget ? g.budget.aoRes : 1));
     }
     // High threshold: only emissive lights (gate, lamps, head/tail lights) bloom.
-    if (g.bloom === 'on') composer.addPass(new UnrealBloomPass(new THREE.Vector2(w, h), 0.4, 0.35, 0.92));
+    if (g.bloom === 'on') composer.addPass(atScale(new UnrealBloomPass(new THREE.Vector2(w, h), 0.4, 0.35, 0.92), g.budget ? g.budget.bloomRes : 1));
     if (g.grade === 'on') composer.addPass(new ShaderPass(GradeShader));
     composer.addPass(new OutputPass());
     if (g.antialias === 'smaa') composer.addPass(new SMAAPass());

@@ -1,7 +1,7 @@
 'use strict';
 
-// Parkwise graphics quality model: presets, per-category overrides, GPU
-// detection, a cost summary and the Graphics panel strings. Pure (no three.js),
+// Parkwise graphics quality model: presets, per-category overrides, StarHermit
+// hardware-level detection, per-preset asset/effect budgets, a cost summary and the Graphics panel strings. Pure (no three.js),
 // so the settings panel, the renderer and the unit tests agree on what a
 // setting means. Works in the browser (window.PARKWISE_GFX) and Node.
 (function (root, factory) {
@@ -35,18 +35,66 @@
 
     const SHADOW_MAP = { off: 0, low: 1024, medium: 2048, high: 4096 };
 
-    /** Best preset for this GPU, from the unmasked renderer string when the browser exposes it. */
-    function detectPreset(gpu) {
-        const g = String(gpu || '').toLowerCase();
-        if (/swiftshader|llvmpipe|softpipe|software|basic render|microsoft basic/.test(g)) return 'low';
-        if (/nvidia|geforce|rtx|gtx|quadro|radeon rx|radeon pro|amd radeon(?!.*graphics)|apple m\d/.test(g)) return 'high';
-        return 'balanced';
+    // Auto picks the preset from the StarHermit hardware level (0 = Galaxy S20 / Intel UHD or weaker,
+    // 20 = RTX 5090; gpu-level.js → window.StarHermitGpu, a classic script loaded before the game): Low
+    // from 0, Balanced from 4, High from 10, Ultra from 17. Phones, tablets and ≤ 4 GB machines are
+    // capped at level 9.
+    const LEVELS = { low: 0, balanced: 4, high: 10, ultra: 17 };
+    function gpuApi() {
+        if (typeof self !== 'undefined' && self.StarHermitGpu) return self.StarHermitGpu;
+        return typeof globalThis !== 'undefined' ? globalThis.StarHermitGpu : null;
     }
 
-    /** Auto choice: detected preset, capped at Balanced on touch/mobile devices. */
-    function autoPreset(gpu, mobile) {
-        const p = detectPreset(gpu);
-        return mobile && PRESETS.indexOf(p) > PRESETS.indexOf('balanced') ? 'balanced' : p;
+    /** Hardware level 0–20 for an unmasked renderer string plus detectSystem() facts (or true = phone/tablet). */
+    function detectLevel(gpu, system) {
+        const G = gpuApi();
+        const sys = Object.assign({ webgl: true, webgl2: true }, typeof system === 'object' && system ? system : { mobile: !!system }, { gpu: String(gpu || '') });
+        if (!gpu) sys.webgl = false; // no renderer string: no usable WebGL
+        return G ? G.detectLevel(sys) : (gpu ? LEVELS.balanced : 0);
+    }
+
+    /** The preset Auto starts from for a hardware level. */
+    function presetForLevel(level) {
+        const G = gpuApi();
+        return G ? G.presetForLevel(level, LEVELS) : PRESETS.filter(p => LEVELS[p] <= level).pop() || 'low';
+    }
+
+    /** Best preset for this GPU (the hardware level already caps phones/tablets at Balanced). */
+    function detectPreset(gpu, system) { return presetForLevel(detectLevel(gpu, system)); }
+
+    /** Auto choice for a renderer string and device facts (kept for callers passing a mobile flag). */
+    function autoPreset(gpu, system) { return detectPreset(gpu, system); }
+
+    /*
+     * Per-preset asset and effect budget. Each preset holds 60 FPS on the weakest GPU Auto gives it
+     * (Low → level 0, Balanced → 4, High → 10, Ultra → 17; measured with tests/gfx-bench.mjs). Grid,
+     * vehicles' footprints, hit areas and rules are identical on every preset — only visuals change.
+     *   material  lit-surface shading: lambert (Low) / standard (Balanced) / physical clear-coated paint
+     *             and glass (High, Ultra; Scene detail Detailed)
+     *   curve / bevel  rounded-slab corner and bevel segments (detailed vehicles, AC units)
+     *   texture   asphalt / concrete texture size in px (Detailed)
+     *   skyline   distant city blocks (Detailed; one instanced draw)
+     *   dust      drifting dust motes (Particles high), scaled with the level
+     *   confetti  exit-celebration confetti pieces (Particles high; low: half), scaled with the level
+     *   bloomRes / aoRes  bloom and GTAO resolution as a fraction of the frame
+     */
+    const BUDGETS = {
+        low: { material: 'lambert', curve: 2, bevel: 1, texture: 128, skyline: 20, dust: 40, confetti: 40, bloomRes: 0.5, aoRes: 0.5 },
+        balanced: { material: 'standard', curve: 3, bevel: 2, texture: 256, skyline: 30, dust: 60, confetti: 60, bloomRes: 0.5, aoRes: 0.5 },
+        high: { material: 'physical', curve: 5, bevel: 3, texture: 256, skyline: 46, dust: 110, confetti: 120, bloomRes: 0.5, aoRes: 0.5 },
+        ultra: { material: 'physical', curve: 8, bevel: 4, texture: 512, skyline: 64, dust: 180, confetti: 180, bloomRes: 1, aoRes: 1 },
+    };
+    const DUST_MAX = 360, CONFETTI_MAX = 360;
+
+    /** A preset's concrete budget for a hardware level (counts scale ≤ 2× within the preset). */
+    function budgetFor(preset, level) {
+        const b = Object.assign({}, BUDGETS[preset] || BUDGETS.balanced);
+        const G = gpuApi(), floor = LEVELS[preset] || 0;
+        const lv = Math.max(Number.isFinite(level) ? level : floor, floor);
+        const k = G ? Math.min(2, G.scaleBudget(1, lv, floor)) : 1;
+        b.dust = Math.min(DUST_MAX, Math.round(b.dust * k));
+        b.confetti = Math.min(CONFETTI_MAX, Math.round(b.confetti * k));
+        return b;
     }
 
     function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
@@ -55,13 +103,15 @@
      * Resolve saved settings into concrete tiers.
      * `saved`: { preset: 'auto'|preset, render_scale, adaptive, show_fps, <category>: 'preset'|tier }.
      */
-    function resolve(saved, detected) {
+    function resolve(saved, detected, level) {
         const s = saved || {};
         const preset = PRESETS.includes(s.preset) ? s.preset : (PRESETS.includes(detected) ? detected : 'balanced');
         const row = TABLE[preset];
         const userScale = clamp(Number(s.render_scale) || 1, 0.5, 2);
         const out = { preset, auto: !PRESETS.includes(s.preset), scale: row.scale * userScale, userScale, cap: row.cap };
         for (const [cat, tiers] of Object.entries(CATEGORIES)) out[cat] = tiers.includes(s[cat]) ? s[cat] : row[cat];
+        out.level = Number.isFinite(level) ? level : LEVELS[preset];
+        out.budget = budgetFor(preset, out.level);
         out.adaptive = s.adaptive !== false;
         out.showFps = !!s.show_fps;
         // Post-processing runs only when something needs it; otherwise the canvas renders directly.
@@ -91,7 +141,7 @@
         cats: { shadows: 'Shadows', ao: 'Ambient occlusion', bloom: 'Bloom', grade: 'Color grade', antialias: 'Anti-aliasing', reflections: 'Reflections', detail: 'Scene detail', particles: 'Particles' },
         tiers: { low: 'Low', balanced: 'Balanced', high: 'High', ultra: 'Ultra', off: 'Off', on: 'On', medium: 'Medium', fxaa: 'FXAA', smaa: 'SMAA', msaa: 'MSAA', plain: 'Plain', detailed: 'Detailed' },
         sum: { noShadows: 'no shadows', shadows: '{n}² shadows', ao: 'ambient occlusion', aoHigh: 'full ambient occlusion', bloom: 'bloom', reflections: 'reflections', noAa: 'no anti-aliasing' },
-        gpuUnknown: 'unknown GPU',
+        gpuUnknown: 'unknown GPU', level: 'Level {n}',
     };
     function over(base, patch) {
         const o = Object.assign({}, base, patch);
@@ -106,7 +156,7 @@
         cats: { shadows: 'Sombras', ao: 'Oclusión ambiental', bloom: 'Resplandor', grade: 'Gradación de color', antialias: 'Antialiasing', reflections: 'Reflejos', detail: 'Detalle de la escena', particles: 'Partículas' },
         tiers: { low: 'Baja', balanced: 'Equilibrada', high: 'Alta', ultra: 'Ultra', off: 'No', on: 'Sí', medium: 'Media', plain: 'Simple', detailed: 'Detallado' },
         sum: { noShadows: 'sin sombras', shadows: 'sombras {n}²', ao: 'oclusión ambiental', aoHigh: 'oclusión ambiental completa', bloom: 'resplandor', reflections: 'reflejos', noAa: 'sin antialiasing' },
-        gpuUnknown: 'GPU desconocida',
+        gpuUnknown: 'GPU desconocida', level: 'Nivel {n}',
     });
     const STRINGS = {
         'en-US': EN,
@@ -121,7 +171,7 @@
             cats: { shadows: 'Schatten', ao: 'Umgebungsverdeckung', bloom: 'Leuchteffekt', grade: 'Farbkorrektur', antialias: 'Kantenglättung', reflections: 'Spiegelungen', detail: 'Szenendetails', particles: 'Partikel' },
             tiers: { low: 'Niedrig', balanced: 'Ausgewogen', high: 'Hoch', ultra: 'Ultra', off: 'Aus', on: 'An', medium: 'Mittel', plain: 'Einfach', detailed: 'Detailliert' },
             sum: { noShadows: 'keine Schatten', shadows: '{n}²-Schatten', ao: 'Umgebungsverdeckung', aoHigh: 'volle Umgebungsverdeckung', bloom: 'Leuchteffekt', reflections: 'Spiegelungen', noAa: 'keine Kantenglättung' },
-            gpuUnknown: 'unbekannte GPU',
+            gpuUnknown: 'unbekannte GPU', level: 'Stufe {n}',
         }),
         'fr-FR': over(EN, {
             graphics: 'Graphismes', quality: 'Qualité', auto: 'Auto (détectée : {tier})',
@@ -131,7 +181,7 @@
             cats: { shadows: 'Ombres', ao: 'Occlusion ambiante', bloom: 'Halo lumineux', grade: 'Étalonnage', antialias: 'Anticrénelage', reflections: 'Reflets', detail: 'Détails de la scène', particles: 'Particules' },
             tiers: { low: 'Basse', balanced: 'Équilibrée', high: 'Haute', ultra: 'Ultra', off: 'Non', on: 'Oui', medium: 'Moyenne', plain: 'Simple', detailed: 'Détaillé' },
             sum: { noShadows: 'sans ombres', shadows: 'ombres {n}²', ao: 'occlusion ambiante', aoHigh: 'occlusion ambiante complète', bloom: 'halo', reflections: 'reflets', noAa: 'sans anticrénelage' },
-            gpuUnknown: 'GPU inconnu',
+            gpuUnknown: 'GPU inconnu', level: 'Niveau {n}',
         }),
         'pt-BR': over(EN, {
             graphics: 'Gráficos', quality: 'Qualidade', auto: 'Automática (detectada: {tier})',
@@ -141,7 +191,7 @@
             cats: { shadows: 'Sombras', ao: 'Oclusão de ambiente', bloom: 'Brilho', grade: 'Correção de cor', antialias: 'Antisserrilhamento', reflections: 'Reflexos', detail: 'Detalhes da cena', particles: 'Partículas' },
             tiers: { low: 'Baixa', balanced: 'Equilibrada', high: 'Alta', ultra: 'Ultra', off: 'Não', on: 'Sim', medium: 'Média', plain: 'Simples', detailed: 'Detalhado' },
             sum: { noShadows: 'sem sombras', shadows: 'sombras {n}²', ao: 'oclusão de ambiente', aoHigh: 'oclusão de ambiente completa', bloom: 'brilho', reflections: 'reflexos', noAa: 'sem antisserrilhamento' },
-            gpuUnknown: 'GPU desconhecida',
+            gpuUnknown: 'GPU desconhecida', level: 'Nível {n}',
         }),
         'it-IT': over(EN, {
             graphics: 'Grafica', quality: 'Qualità', auto: 'Automatica (rilevata: {tier})',
@@ -151,7 +201,7 @@
             cats: { shadows: 'Ombre', ao: 'Occlusione ambientale', bloom: 'Bagliore', grade: 'Correzione colore', antialias: 'Antialiasing', reflections: 'Riflessi', detail: 'Dettaglio scena', particles: 'Particelle' },
             tiers: { low: 'Bassa', balanced: 'Bilanciata', high: 'Alta', ultra: 'Ultra', off: 'No', on: 'Sì', medium: 'Media', plain: 'Semplice', detailed: 'Dettagliato' },
             sum: { noShadows: 'senza ombre', shadows: 'ombre {n}²', ao: 'occlusione ambientale', aoHigh: 'occlusione ambientale completa', bloom: 'bagliore', reflections: 'riflessi', noAa: 'senza antialiasing' },
-            gpuUnknown: 'GPU sconosciuta',
+            gpuUnknown: 'GPU sconosciuta', level: 'Livello {n}',
         }),
     };
     STRINGS['fr-CA'] = over(STRINGS['fr-FR'], { showFps: 'Afficher les images par seconde' });
@@ -197,5 +247,5 @@
         return parts.filter(Boolean).join(' · ');
     }
 
-    return { PRESETS, CATEGORIES, SHADOW_MAP, detectPreset, autoPreset, resolve, withPreset, presetTier, describe, STRINGS, pickLocale, strings };
+    return { PRESETS, CATEGORIES, SHADOW_MAP, LEVELS, BUDGETS, DUST_MAX, CONFETTI_MAX, detectLevel, presetForLevel, budgetFor, detectPreset, autoPreset, resolve, withPreset, presetTier, describe, STRINGS, pickLocale, strings };
 });
