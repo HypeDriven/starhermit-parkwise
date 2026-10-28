@@ -1,24 +1,21 @@
 {
   "name": "parkwise",
   "version": "1.0.0",
-  "description": "Parkwise — rooftop sliding-block parking puzzle (browser + authoritative Node server).",
-  "main": "server.js",
+  "private": true,
+  "description": "Parkwise — a rooftop sliding-block parking puzzle on the StarHermit engine.",
   "scripts": {
-    "start": "node server.js",
-    "test": "node --test tests/*.test.js",
-    "test:e2e": "node tests/e2e.mjs"
+    "test": "npm run test:unit && npm run test:native",
+    "test:unit": "node --test tests/rules.test.js tests/content.test.js tests/levels.test.js tests/progress.test.js tests/i18n.test.js tests/server.test.js",
+    "test:native": "node tests/native.mjs",
+    "test:browser": "node tools/browser-play.mjs .",
+    "package": "node tools/package-web.mjs",
+    "css": "node tools/css.mjs",
+    "plays": "node tools/gen-plays.mjs",
+    "levels": "node tools/gen-levels.mjs",
+    "levels:verify": "node tools/gen-levels.mjs --verify",
+    "serve": "node server.js"
   },
-  "keywords": [
-    "puzzle",
-    "sliding-block",
-    "three.js"
-  ],
-  "author": "",
   "license": "SEE LICENSE IN LICENSE.md",
-  "dependencies": {
-    "esbuild": "^0.28.2",
-    "three": "^0.185.1"
-  },
   "devDependencies": {
     "playwright-core": "^1.62.1"
   }

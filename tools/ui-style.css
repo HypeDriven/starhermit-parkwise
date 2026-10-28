@@ -1,0 +1,145 @@
+/* Parkwise — the browser build's index.html <style> rewritten class-based for
+   the engine's UI (`npm run css` converts it into assets/ui-style.json).
+   Element selectors, ids, attribute selectors and @media do not convert:
+   every widget names its classes and the breakpoints are layouts picked in
+   native/screens.ts (wide ≥ 1024 px: both rails beside the lot; compact:
+   the rails become drawers behind the ☰ and ⚙ buttons; landscape phones a
+   tighter status bar and tray). body.high-contrast is a token set in
+   native/style.ts, applied while the runtime's high-contrast option is on;
+   larger text is the runtime's text size; ui-scale.js is the runtime's UI
+   scale. */
+
+:root {
+  --bg: #0b1220;
+  --panel: #141d2e;
+  --panel2: #1b2740;
+  --ink: #eef3f8;
+  --dim: #9fb2c8;
+  --accent: #e86a3c;
+  --accent2: #2f9e6e;
+  --danger: #e53935;
+  --focus: #ffd54f;
+  --bar: #0a101cd9;
+  --hover: #253350;
+}
+
+* { box-sizing: border-box; }
+
+/* ------------------------------------------------------------- text */
+.text { color: var(--ink); font-size: 16px; }
+.strong { color: var(--ink); font-size: 16px; font-weight: 700; }
+.dim { color: var(--dim); font-size: 16px; }
+.dim-small { color: var(--dim); font-size: 13.6px; }
+.tagline { color: var(--dim); font-size: 16px; text-align: center; }
+.brand {
+  color: var(--ink); font-size: 52px; font-weight: 800; letter-spacing: 3px; text-align: center;
+  text-shadow: 0 2px 0 #00000059, 0 0 28px #e86a3c59;
+}
+.screen-h2 { color: var(--ink); font-size: 24px; font-weight: 700; }
+.section-h3 { color: var(--ink); font-size: 18.7px; font-weight: 700; }
+.rail-h3 { color: var(--ink); font-size: 15.2px; font-weight: 700; }
+.rail-text { color: var(--dim); font-size: 13.6px; }
+.chip-text { color: var(--ink); font-size: 16px; font-weight: 600; }
+.chip-text-small { color: var(--ink); font-size: 13.6px; font-weight: 600; }
+.menu-title { color: var(--ink); font-size: 16px; font-weight: 700; }
+.menu-desc { color: var(--dim); font-size: 13.6px; }
+.menu-meta { color: var(--dim); font-size: 13.6px; text-align: end; }
+.headline { color: var(--ink); font-size: 17.6px; font-weight: 700; }
+.score-num { color: var(--ink); font-size: 16px; text-align: end; }
+.total { color: var(--ink); font-size: 17.6px; font-weight: 800; }
+.total-num { color: var(--ink); font-size: 17.6px; font-weight: 800; text-align: end; }
+.caption-text { color: var(--ink); font-size: 14.4px; text-align: center; }
+.toast-text { color: var(--ink); font-size: 16px; text-align: center; }
+.fps-text { color: #ffffff; font-size: 12px; font-weight: 600; }
+
+/* ------------------------------------------------------------- surfaces */
+.page { background: var(--bg); border-radius: 0; }
+/* #screen-title: dusk sky over a rooftop skyline (the skyline is drawn in native/screens.ts); the
+   warm glow (radial-gradient(ellipse 70% 45% at 50% 108%, …)) is .title-glow drawn over a box 140 % × 90 %
+   of the window centred at 50% 108%. */
+.title-bg { background: linear-gradient(180deg, #0b1220 0%, #121c33 55%, #1d2342 100%); border-radius: 0; }
+.title-glow { background: radial-gradient(closest-side, #e86a3c47, #e86a3c00 70%); border-radius: 0; }
+.skyline { background: #070c17e6; border-radius: 0; }
+.statusbar { background: var(--bar); border-radius: 0; padding: 8px 12px; }
+.tray { background: var(--bar); border-radius: 0; padding: 10px 12px; }
+.chip { background: var(--panel2); border-radius: 8px; padding: 4px 12px; }
+.rail-card { background: var(--panel); border-radius: 12px; padding: 12px 14px; }
+.drawer { background: var(--panel); border-radius: 0; padding: 10px; box-shadow: 0 0 40px #00000099; }
+.scrim { background: #00000059; border-radius: 0; }
+.dialog-box { background: var(--panel); border-radius: 16px; padding: 22px; box-shadow: 0 20px 60px #00000099; }
+.score-row { border-bottom: 1px solid #ffffff14; border-radius: 0; padding: 5px 8px; }
+.score-row-last { border-radius: 0; padding: 5px 8px; }
+.caption { background: #000000bf; border-radius: 8px; padding: 4px 14px; }
+.toast { background: var(--panel2); border: 1px solid var(--accent); border-radius: 12px; padding: 10px 16px; }
+.fps { background: #00000099; border-radius: 6px; padding: 2px 8px; }
+.settings-row { border-radius: 0; padding: 6px 0; }
+
+/* ------------------------------------------------------------- buttons */
+.btn {
+  min-height: 44px; min-width: 44px; padding: 12px 24px;
+  background: var(--panel2); border-radius: 12px;
+  box-shadow: 0 4px 14px #00000059;
+  color: var(--ink); font-size: 16px; font-weight: 700; text-align: center;
+}
+.btn:hover { background: var(--hover); }
+.btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.btn:disabled { opacity: 0.45; }
+.btn-primary {
+  min-height: 44px; min-width: 44px; padding: 14px 34px;
+  background: var(--accent); border-radius: 12px;
+  box-shadow: 0 4px 14px #00000059;
+  color: #ffffff; font-size: 18.4px; font-weight: 700; text-align: center;
+}
+.btn-primary:hover { background: #f07a4e; }
+.btn-primary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.btn-primary:disabled { opacity: 0.45; }
+.btn-good {
+  min-height: 44px; min-width: 44px; padding: 12px 24px;
+  background: var(--accent2); border-radius: 12px;
+  color: var(--ink); font-size: 16px; font-weight: 700; text-align: center;
+}
+.btn-good:hover { background: #38b07c; }
+.btn-good:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.btn-ghost {
+  min-height: 44px; min-width: 44px; padding: 12px 24px;
+  background: #00000000; border: 2px solid var(--dim); border-radius: 12px;
+  color: var(--ink); font-size: 16px; font-weight: 700; text-align: center;
+}
+.btn-ghost:hover { background: var(--panel); }
+.btn-ghost:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.btn-ghost:disabled { opacity: 0.45; }
+.btn-tray {
+  min-height: 44px; min-width: 44px; padding: 12px 8px;
+  background: var(--panel2); border-radius: 12px;
+  box-shadow: 0 4px 14px #00000059;
+  color: var(--ink); font-size: 16px; font-weight: 700; text-align: center;
+}
+.btn-tray:hover { background: var(--hover); }
+.btn-tray:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.btn-tray:disabled { opacity: 0.45; }
+.btn-tray-ghost {
+  min-height: 44px; min-width: 44px; padding: 12px 8px;
+  background: #00000000; border: 2px solid var(--dim); border-radius: 12px;
+  color: var(--ink); font-size: 16px; font-weight: 700; text-align: center;
+}
+.btn-tray-ghost:hover { background: var(--panel); }
+.btn-tray-ghost:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.btn-tray-ghost:disabled { opacity: 0.45; }
+/* .menu-item: a mode / stage row with its title, description and meta. */
+.menu-item {
+  min-height: 44px; padding: 14px 18px;
+  background: var(--panel); border: 2px solid #00000000; border-radius: 12px;
+  color: var(--ink); font-size: 16px; text-align: start;
+}
+.menu-item:hover { border: 2px solid var(--accent); }
+.menu-item:focus-visible { border: 2px solid var(--accent); outline: 3px solid var(--focus); outline-offset: 2px; }
+.menu-item:disabled { opacity: 0.45; }
+/* .vehicle-list button: the screen-reader board model, the selected one ringed. */
+.vehicle-btn {
+  min-height: 44px; padding: 8px 10px;
+  background: var(--panel2); border: 2px solid #00000000; border-radius: 8px;
+  color: var(--ink); font-size: 13.6px; text-align: start;
+}
+.vehicle-btn:hover { background: var(--hover); }
+.vehicle-btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.vehicle-btn.selected { border: 2px solid var(--accent); }

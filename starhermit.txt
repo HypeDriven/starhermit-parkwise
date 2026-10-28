@@ -1,16 +1,49 @@
 name=Parkwise
 description=Slide cars and trucks along their lanes to open an escape route for the target vehicle.
-launch=index.html
 owner=2712e04e-461b-4d23-81ae-e40b429128a8
 server=score-script.js
 cover=cover.jpg
+
+# StarHermit engine script game: one package, played natively by the
+# StarHermit client and in browsers by the engine's web runtime. Browsers open
+# launch=index.html, the loader `npm run package` writes (it pins the engine
+# on wiki.starhermit.com by hash; never edit it). Re-run `npm run package`
+# after every change and commit index.html + starhermit-files.json.
+launch=index.html
+engine.api=1
+engine.entry=native/main.ts
+engine.version=1.19.2
+engine.minor=20
+engine.capabilities=platform,storage,clipboard
+
+# Keyboard controls (players rebind keys and pads in the runtime's Options).
+# The arrows slide the selected vehicle along its axis; vehicles are also
+# selected and slid with the pointer or a finger on the lot (tap a vehicle,
+# then drag it or tap a glowing target marker), and from the Vehicles list.
 control.left=ArrowLeft | Slide left
 control.right=ArrowRight | Slide right
 control.up=ArrowUp | Slide up
 control.down=ArrowDown | Slide down
+control.next_vehicle=KeyN | Next vehicle
 control.undo=KeyU | Undo
 control.hint=KeyH | Hint
 control.restart=KeyR | Restart
 control.camera=KeyC | Reset camera
 control.pause=KeyP | Pause
 control.menu=Escape | Pause / close dialog
+engine.group.left=Sliding
+engine.group.undo=Round
+
+# Gamepad defaults (the browser build's: the left stick or D-pad slides, Y
+# picks the next vehicle, B undoes, X shows a hint, Start pauses), plus
+# Select to restart and the right stick press to reset the camera.
+engine.gamepad.left=LeftStickLeft+DpadLeft
+engine.gamepad.right=LeftStickRight+DpadRight
+engine.gamepad.up=LeftStickUp+DpadUp
+engine.gamepad.down=LeftStickDown+DpadDown
+engine.gamepad.next_vehicle=North
+engine.gamepad.undo=East
+engine.gamepad.hint=West
+engine.gamepad.pause=Start
+engine.gamepad.restart=Select
+engine.gamepad.camera=RightStickPress
