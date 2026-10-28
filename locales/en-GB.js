@@ -5,4 +5,4 @@
   var out = { "en-GB": D0 };
   if (typeof module === 'object' && module.exports) module.exports = out;
   else Object.assign(g.PARKWISE_LOCALES = g.PARKWISE_LOCALES || {}, out);
-})(typeof self !== 'undefined' ? self : this);
+})(typeof self !== 'undefined' ? self : globalThis);

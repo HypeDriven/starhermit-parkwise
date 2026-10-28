@@ -1,13 +1,21 @@
 'use strict';
 
 // Parkwise content: versioned levels, tutorials, challenges, themes, and a
-// deterministic, validated level generator. Works in browser and Node.
+// deterministic, validated level generator. Works in the engine (classic
+// script), in its workers and in Node. The generator's results for the 40
+// Journey stages, the first Practice lots and the Dailies of 2026-10-01 …
+// 2028-12-31 are precomputed in levels.js (tools/gen-levels.mjs; the tests
+// check them against the generator): searching them takes seconds each, ~20×
+// longer in the engine's interpreter. Lots outside the table are generated.
 (function (root, factory) {
-    const R = (typeof module !== 'undefined' && module.exports) ? require('./rules.js') : root.PARKWISE_RULES;
-    const api = factory(R);
+    const node = typeof module !== 'undefined' && module.exports;
+    const R = node ? require('./rules.js') : root.PARKWISE_RULES;
+    let L = null;
+    if (node) { try { L = process.env.PARKWISE_NO_LEVELS ? null : require('./levels.js'); } catch (e) { L = null; } } else L = root.PARKWISE_LEVELS || null;
+    const api = factory(R, L);
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.PARKWISE_CONTENT = api;
-})(typeof self !== 'undefined' ? self : globalThis, function (R) {
+})(typeof self !== 'undefined' ? self : globalThis, function (R, LEVELS) {
 
     const CONTENT_VERSION = 1;
     const GRID = R.GRID;
@@ -119,13 +127,29 @@
     const JOURNEY_COUNT = 40;
     const journeyCache = new Map();
 
-    function journeyLevel(index) {
-        if (journeyCache.has(index)) return journeyCache.get(index);
+    // levels.js rows: "par:xyLo xyLo …" (vehicle i at x,y, length L, orientation o; vehicle 0 is the target).
+    function decode(row) {
+        const [par, list] = row.split(':');
+        return { par: +par, level: { vehicles: list.split(' ').map((c, i) => ({ id: i, x: +c[0], y: +c[1], len: +c[2], ori: c[3], target: i === 0 })) } };
+    }
+    function encode(made) {
+        return made.par + ':' + made.level.vehicles.map(v => '' + v.x + v.y + v.len + v.ori).join(' ');
+    }
+    function generateJourney(index) {
         const cfg = difficultyFor(index);
         const seed = 0x5150 + index * 7919;
         let made = tryGenerate(seed, cfg);
         if (!made) made = tryGenerate(seed + 1, { vehicles: cfg.vehicles, minDepth: 2, maxDepth: cfg.maxDepth + 6 });
         if (!made) throw new Error('content generator failed for stage ' + index);
+        return made;
+    }
+
+    function journeyLevel(index) {
+        if (journeyCache.has(index)) return journeyCache.get(index);
+        const cfg = difficultyFor(index);
+        const seed = 0x5150 + index * 7919;
+        const row = LEVELS && LEVELS.journey && LEVELS.journey[index];
+        const made = row ? decode(row) : generateJourney(index);
         const entry = {
             id: 'journey-' + (index + 1), version: CONTENT_VERSION, seed,
             level: made.level, par: made.par,
@@ -142,11 +166,20 @@
         return R.hash('parkwise-daily-' + dayKey).slice(0, 8);
     }
 
-    function dailyLevel(dayKey) {
+    function generateDaily(dayKey) {
         const seed = parseInt(dailySeed(dayKey), 16);
         const made = tryGenerate(seed, { vehicles: 10, minDepth: 8, maxDepth: 20 }) ||
             tryGenerate(seed + 1, { vehicles: 9, minDepth: 5, maxDepth: 24 });
         if (!made) throw new Error('daily generator failed for ' + dayKey);
+        return made;
+    }
+    /** Whether the Daily of a day is precomputed (else dailyLevel searches for it). */
+    function dailyReady(dayKey) { return !!(LEVELS && LEVELS.daily && LEVELS.daily[dayKey]); }
+
+    function dailyLevel(dayKey) {
+        const seed = parseInt(dailySeed(dayKey), 16);
+        const row = LEVELS && LEVELS.daily && LEVELS.daily[dayKey];
+        const made = row ? decode(row) : generateDaily(dayKey);
         return {
             id: 'daily-' + dayKey, version: CONTENT_VERSION, seed,
             level: made.level, par: made.par, mechanics: ['slide'], tutorial: false,
@@ -164,8 +197,8 @@
         const cfg = cfgs[Math.max(0, Math.min(2, tier | 0))];
         return function (attempt) {
             const seed = 0xC0FFEE + tier * 100003 + attempt * 31337;
-            const made = tryGenerate(seed, cfg) || tryGenerate(seed + 7, { vehicles: cfg.vehicles, minDepth: 2, maxDepth: cfg.maxDepth + 8 });
-            if (!made) throw new Error('practice generator failed');
+            const rows = LEVELS && LEVELS.practice && LEVELS.practice[tier];
+            const made = rows && rows[attempt] ? decode(rows[attempt]) : generatePractice(cfg, seed);
             return {
                 id: 'practice-' + tier + '-' + attempt, version: CONTENT_VERSION, seed,
                 level: made.level, par: made.par, mechanics: ['slide'], tutorial: false,
@@ -173,6 +206,14 @@
             };
         };
     }
+
+    function generatePractice(cfg, seed) {
+        const made = tryGenerate(seed, cfg) || tryGenerate(seed + 7, { vehicles: cfg.vehicles, minDepth: 2, maxDepth: cfg.maxDepth + 8 });
+        if (!made) throw new Error('practice generator failed');
+        return made;
+    }
+    /** Whether a Practice lot is precomputed (else practiceLevel(tier)(attempt) searches for it). */
+    function practiceReady(tier, attempt) { const rows = LEVELS && LEVELS.practice && LEVELS.practice[tier]; return !!(rows && rows[attempt]); }
 
     // Challenge mode: constrained goals over generated layouts.
     function challengeLevel(index) {
@@ -226,7 +267,16 @@
 
     return {
         CONTENT_VERSION, THEMES, TUTORIALS, JOURNEY_COUNT,
-        difficultyFor, journeyLevel, dailyLevel, dailySeed, practiceLevel, challengeLevel,
+        difficultyFor, journeyLevel, dailyLevel, dailySeed, practiceLevel, challengeLevel, dailyReady, practiceReady,
+        // the raw generator, for tools/gen-levels.mjs and the levels.js tests
+        generate: {
+            journey: index => encode(generateJourney(index)),
+            daily: dayKey => encode(generateDaily(dayKey)),
+            practice: (tier, attempt) => {
+                const cfgs = [{ vehicles: 7, minDepth: 3, maxDepth: 8 }, { vehicles: 9, minDepth: 7, maxDepth: 14 }, { vehicles: 12, minDepth: 12, maxDepth: 24 }];
+                return encode(generatePractice(cfgs[tier], 0xC0FFEE + tier * 100003 + attempt * 31337));
+            },
+        },
         validateEntry, validateAll,
     };
 });

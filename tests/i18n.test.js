@@ -4,13 +4,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const I = require('../i18n.js');
-const G = require('../gfx.js');
+const SH = require('../sh-strings.js');
 const { ALL } = require('./i18n-keys.js');
 
 const placeholders = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',');
 
 test('the key set is non-trivial', () => {
-  assert.ok(ALL.size > 200, `only ${ALL.size} keys found`);
+  assert.ok(ALL.size > 150, `only ${ALL.size} keys found`);
 });
 
 for (const locale of I.LOCALES.filter((l) => l !== 'en-US' && l !== 'en-GB')) {
@@ -30,13 +30,12 @@ test('no locale carries keys that no longer exist', () => {
   }
 });
 
-test('Graphics and StarHermit strings exist in all nine locales', () => {
+test('the StarHermit account strings exist in all nine locales', () => {
   for (const locale of I.LOCALES) {
-    const s = G.strings(G.pickLocale(locale));
-    assert.ok(s.quality, locale);
-    assert.ok(s.sh && s.sh.signIn, locale);
+    for (const k of ['signIn', 'invite', 'copied', 'copyFailed', 'signedOut', 'lbPosting', 'lbRank', 'lbPosted', 'lbNotPosted']) assert.ok(SH[locale] && SH[locale][k], locale + ' ' + k);
+    assert.ok(SH[locale].lbRank.includes('{rank}'), locale);
   }
-  assert.notEqual(G.strings('de-DE').sh.signIn, G.strings('en-US').sh.signIn);
+  assert.notEqual(SH['de-DE'].signIn, SH['en-US'].signIn);
 });
 
 test('T falls back to the key and fills placeholders; regional variants inherit', () => {

@@ -23,7 +23,7 @@
   var api = factory(global);
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { global.PARKWISE_I18N = api; api.init(); }
-})(typeof self !== 'undefined' ? self : this, function (global) {
+})(typeof self !== 'undefined' ? self : globalThis, function (global) {
   'use strict';
 
   var LOCALES = ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT'];
