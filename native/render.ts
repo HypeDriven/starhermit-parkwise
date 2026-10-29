@@ -14,8 +14,8 @@
 // Slides animate on a 0.16 s ease-out; reduced motion snaps them and stops
 // the bob, pulses, blink and drift.
 //
-// From three.js r185: light intensities are r185's ÷ π (the engine's
-// convention); RoomEnvironment(renderer) + PMREM give the reflections at the
+// From three.js r185 (engine.minor 28): light intensities, shadow box and bias as main.js set them;
+// RoomEnvironment(renderer) lowered as r183+ + PMREM give the reflections at the
 // old environmentIntensity 0.45; the post chain (GTAO, UnrealBloom 0.4 /
 // 0.35 / 0.92 before the output pass's ACES, the GradeShader, FXAA / SMAA /
 // MSAA) is renderer.ao / bloom / grade / antialias. The skyline's
@@ -27,7 +27,7 @@ import {
   ACESFilmicToneMapping, BoxGeometry, BufferGeometry, CanvasTexture, CircleGeometry, Color, CylinderGeometry, DirectionalLight,
   DoubleSide, ExtrudeGeometry, Fog, Group, HemisphereLight, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshLambertMaterial,
   MeshPhysicalMaterial, MeshStandardMaterial, PerspectiveCamera, Plane, PMREMGenerator, Points, PointsMaterial, Quaternion, Raycaster,
-  RepeatWrapping, RingGeometry, RoomEnvironment, SRGBColorSpace, Shape, ShapeGeometry, SphereGeometry, Vector3, pointerToNdc, renderer, scene,
+  OrthographicCamera, RepeatWrapping, RingGeometry, RoomEnvironment, SRGBColorSpace, Shape, ShapeGeometry, SphereGeometry, Vector3, pointerToNdc, renderer, scene,
   BufferAttribute, type Material, type Object3D, type Texture,
 } from "starhermit:scene";
 import { OffscreenCanvas, type OffscreenCanvasRenderingContext2D } from "starhermit:canvas";
@@ -40,13 +40,18 @@ const camera = new PerspectiveCamera(46, 1, 0.1, 200);
 const CAM_HOME = { pos: new Vector3(0, 11.5, 10.5), look: new Vector3(0, 0, 0.4) };
 const PI = Math.PI;
 
-const hemi = new HemisphereLight(0xffffff, 0x333344, 0.85 / PI);
-const key = new DirectionalLight(0xffffff, 1.6 / PI);
+const hemi = new HemisphereLight(0xffffff, 0x333344, 0.85);
+const key = new DirectionalLight(0xffffff, 1.6);
 key.position.set(8, 14, 6);
 key.castShadow = true;
-// three's 0.02-world-unit normal bias is ~1 texel of the old 16-unit shadow frustum at 1024².
+// shadow frustum fitted to the rooftop slab + props (half extent ≈ 7.6), as main.js set it
+{
+  const sc = 8, cam = key.shadow.camera as OrthographicCamera;
+  Object.assign(cam, { left: -sc, right: sc, top: sc, bottom: -sc, near: 4, far: 34 });
+  cam.updateProjectionMatrix();
+}
 key.shadow.bias = -0.0004;
-key.shadow.normalBias = 1;
+key.shadow.normalBias = 0.02;
 key.shadow.radius = 3;
 scene.add(hemi, key, key.target);
 
@@ -553,7 +558,11 @@ function showMarkers(vIdx: number): void {
 let envTexture: Texture | null = null;
 function envMap(): Texture | null {
   if (!envTexture) {
-    try { envTexture = new PMREMGenerator(renderer).fromScene(new RoomEnvironment(renderer), 0.04).texture; }
+    try {
+      const room = new RoomEnvironment(renderer);
+      room.position.y = -3.5; // three.js r183+ lowers the room
+      envTexture = new PMREMGenerator(renderer).fromScene(room, 0.04).texture;
+    }
     catch (e) { console.warn(`environment: ${e instanceof Error ? e.message : String(e)}`); }
   }
   return envTexture;
@@ -562,7 +571,7 @@ function applyReflections(): void {
   const env = look && look.reflections ? envMap() : null;
   scene.environment = env;
   scene.environmentIntensity = 0.45;
-  hemi.intensity = (env ? 0.5 : 0.85) / PI;
+  hemi.intensity = env ? 0.5 : 0.85;
 }
 let lookKey = "";
 export function applyLook(next: Look): void {
@@ -671,7 +680,6 @@ function fitCamera(): void {
   camera.updateProjectionMatrix();
   // fog starts behind the lot at any camera distance, so the board never hazes
   if (scene.fog instanceof Fog) { scene.fog.near = dist + 8; scene.fog.far = dist + 46; }
-  key.shadow.distance = dist + 16;
 }
 /** The camera reset key: the authored framing again. */
 export function resetCamera(): void { frameKey = ""; }
