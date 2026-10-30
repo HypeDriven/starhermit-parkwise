@@ -590,11 +590,13 @@ export function applyLook(next: Look): void {
     denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: hi ? 6 : 4, rings: 2, samples: hi ? 16 : 8, radiusExponent: 2 },
   };
   // UnrealBloomPass(0.4, 0.35, 0.92) in the composer before its output pass (linear light): only emissive lights bloom.
+  // The page's three r183 UnrealBloomPass strength, unchanged: minor 29 bloom follows r185 as the page did.
   renderer.bloom = next.bloom ? { strength: 0.4, radius: 0.35, threshold: 0.92, resolution: b.bloomRes } : null;
   // post.js GradeShader (linear light before the output): a 0.18 S-curve, saturation 1.1, cool shadows / warm highlights, the 0.2 vignette.
   renderer.grade = next.grade ? {
     space: "linear", contrast: 0.18, saturation: 1.1, shadows: [0.97, 0.98, 1.04], highlights: [1.03, 1.0, 0.97], split: [0.2, 0.8],
     vignette: { amount: 0.2, inner: 0.38, outer: 0.85 },
+    overRange: "keep", // minor 29: mix(c, s + max(c - 1, 0), amount) as the page's grade
   } : null;
   renderer.antialias = next.antialias;
   renderer.shadowMap.enabled = next.shadows > 0;
