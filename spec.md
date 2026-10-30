@@ -1,7 +1,7 @@
 # Parkwise — Game Specification
 
 **Genre:** sliding-block parking puzzle · **Players:** 1 (asynchronous leaderboard) · **Platform:** a StarHermit engine script game
-(engine 1.29.0, host API 1.31), played natively by the StarHermit client and in browsers by the engine's web runtime.
+(engine 1.30.0, host API 1.32), played natively by the StarHermit client and in browsers by the engine's web runtime.
 
 Parkwise is a rooftop parking diorama: slide cars and vans along the way they face until the red car can drive out through the
 glowing exit gate on the right edge of the lot.
