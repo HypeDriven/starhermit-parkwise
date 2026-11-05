@@ -11,8 +11,7 @@
 // oscillator blips the browser build synthesized while a sample decoded are
 // not ported (a live synthesis graph makes clip loads fail on the engine's
 // web runtime), so a clip still loading is silent. The runtime's Options own
-// the volumes, the mute and the voice limit. Clips load once the mixer runs
-// (natively at once, in a browser after the first press), one at a time.
+// the volumes, the mute and the voice limit. Every clip loads at start.
 import { context, createClip, loadClip, play as playClip, type AudioClip, type Bus, type Sound } from "starhermit:audio";
 import { files } from "starhermit:engine";
 
@@ -21,11 +20,8 @@ const BUS: Record<Sfx, Bus> = { select: "effects", move: "effects", invalid: "ef
 const byEvent = new Map<string, string[]>();
 const turn = new Map<string, number>();
 const clips = new Map<string, AudioClip>();
-const queue: string[] = [];
-let loading = false;
-let wantClips = false;
 
-/** Reads the manifest; the clips load once the mixer runs (see update). */
+/** Reads the manifest and loads every clip at once (onStart); a sound whose clip is still loading is skipped. */
 export function loadSfx(): void {
   try {
     const list = files.readJson("sfx/manifest.json") as unknown as { name: string; event: string }[];
@@ -34,7 +30,9 @@ export function loadSfx(): void {
       byEvent.set(it.event, [...(byEvent.get(it.event) ?? []), it.name]);
     }
   } catch (e) { console.warn(`sfx manifest: ${String(e)}`); }
-  wantClips = true;
+  for (const name of new Set([...byEvent.values()].flat())) {
+    loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); }, (e: unknown) => { console.warn(`sfx ${name}: ${String(e)}`); });
+  }
 }
 
 /** audio.js playSfx(kind): the event's next clip. */
@@ -47,7 +45,7 @@ export function play(kind: Sfx): void {
   const clip = clips.get(name);
   if (!clip) return;
   try { playClip(clip, { bus: BUS[kind] }); }
-  catch { clips.delete(name); if (!queue.includes(name)) queue.push(name); } // a clip the mixer lost: load it again
+  catch { /* the mixer is full this frame: skip it */ }
 }
 
 // -- the music and the ambience -----------------------------------------------------------------
@@ -118,22 +116,9 @@ export function setPlaying(on: boolean): void {
   } catch { /* gone */ }
 }
 
-/** Each frame: the clips once the mixer runs (one at a time), the loops rendered a slice a frame, then started. */
+/** Each frame, once the mixer runs: the loops rendered a slice a frame, then started. */
 export function update(): void {
   if (context.state !== "running") return;
-  if (wantClips) {
-    wantClips = false;
-    for (const list of byEvent.values()) for (const n of list) if (!queue.includes(n)) queue.push(n);
-  }
-  if (!loading && queue.length) {
-    const name = queue.shift()!;
-    if (!clips.has(name)) {
-      loading = true;
-      loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); loading = false; }, (e: unknown) => { console.warn(`sfx ${name}: ${String(e)}`); loading = false; });
-    }
-    return;
-  }
-  if (loading) return;
   if (!rendered) {
     if (!musicClip) {
       if (!renderMusic()) return;

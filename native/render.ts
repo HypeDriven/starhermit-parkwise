@@ -583,15 +583,14 @@ export function applyLook(next: Look): void {
   if (rebuildTex) { for (const t of texCache.values()) t.dispose(); texCache.clear(); }
   renderer.toneMapping = ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
-  const b = next.budget;
-  const hi = next.ao === "high";
-  renderer.ao = next.ao === "off" ? null : {
-    blendIntensity: 0.75, radius: 0.45, distanceExponent: 1.4, thickness: 1.0, scale: 1.0, samples: hi ? 16 : 8, resolution: b.aoRes,
-    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: hi ? 6 : 4, rings: 2, samples: hi ? 16 : 8, radiusExponent: 2 },
+  const ao = next.ao, hi = !!ao && ao.resolution >= 1; // the engine's full-resolution AO is its "high"
+  renderer.ao = ao && {
+    blendIntensity: 0.75, radius: 0.45, distanceExponent: 1.4, thickness: 1.0, scale: 1.0, samples: ao.samples, resolution: ao.resolution,
+    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: hi ? 6 : 4, rings: 2, samples: ao.denoiseSamples, radiusExponent: 2 },
   };
   // UnrealBloomPass(0.4, 0.35, 0.92) in the composer before its output pass (linear light): only emissive lights bloom.
   // The page's three r183 UnrealBloomPass strength, unchanged: minor 29 bloom follows r185 as the page did.
-  renderer.bloom = next.bloom ? { strength: 0.4, radius: 0.35, threshold: 0.92, resolution: b.bloomRes } : null;
+  renderer.bloom = next.bloom === null ? null : { strength: 0.4, radius: 0.35, threshold: 0.92, resolution: next.bloom };
   // post.js GradeShader (linear light before the output): a 0.18 S-curve, saturation 1.1, cool shadows / warm highlights, the 0.2 vignette.
   renderer.grade = next.grade ? {
     space: "linear", contrast: 0.18, saturation: 1.1, shadows: [0.97, 0.98, 1.04], highlights: [1.03, 1.0, 0.97], split: [0.2, 0.8],
@@ -706,16 +705,8 @@ export function pickVehicle(x: number, y: number): number {
 export function pickMarker(x: number, y: number): Move | null {
   if (!renderer.camera) return null;
   const h = cast(x, y, LAYER_MARK).find((i) => i.object.userData.move);
-  if (h) return h.object.userData.move as Move;
-  // The markers are flat discs on the lot: also test the ray's point on their plane against each disc
-  // (the raycast missed some discs near the lot's front edge; reported).
-  raycaster.setFromCamera(pointerToNdc(x, y), camera);
-  const p = new Vector3();
-  if (!raycaster.ray.intersectPlane(markerPlane, p)) return null;
-  for (const m of markerMeshes) if (Math.hypot(m.position.x - p.x, m.position.z - p.z) <= 0.3) return m.userData.move as Move;
-  return null;
+  return h ? h.object.userData.move as Move : null;
 }
-const markerPlane = new Plane(new Vector3(0, 1, 0), -0.075);
 /** Window pixels → board cell coordinates on the lot's plane (for the drag's travel). */
 export function pickCell(x: number, y: number): { x: number; y: number } | null {
   if (!renderer.camera) return null;

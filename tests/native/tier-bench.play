@@ -1,0 +1,45 @@
+# Journey stage 1 solved through the real UI, the exit burst and stage 2, for the graphics-level bench (engine-tier-bench.mjs).
+# viewport 1280x800@1
+until 600 Daily challenge
+frames 20
+click =Journey
+until 600 Moves 0 / par 3
+frames 120
+measure start
+frames 150
+click =red car at column 2, row 3 (target)
+frames 5
+key KeyN 1
+frames 2
+key KeyN 1
+frames 2
+key ArrowLeft 1
+frames 3
+key ArrowLeft 1
+frames 3
+key KeyN 1
+frames 2
+key ArrowDown 1
+frames 3
+key ArrowDown 1
+frames 3
+key KeyN 1
+frames 2
+key KeyN 1
+frames 2
+key KeyN 1
+frames 2
+key KeyN 1
+frames 2
+key ArrowRight 1
+frames 3
+key ArrowRight 1
+frames 3
+key ArrowRight 1
+frames 3
+until 300 Lot cleared!
+frames 200
+click =Next
+until 300 Moves 0 / par
+frames 200
+measure stop

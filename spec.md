@@ -82,12 +82,12 @@ wins in a row), Rooftop veteran (a mastery stage), Commuter (50 wins).
 `native/render.ts` builds the diorama on `starhermit:scene` as the browser build's three.js r185 renderer did: the authored
 camera backing off until the lot fits the playfield (framed with `setViewOffset` between the bars and rails), ACES 1.05, the
 hemisphere fill and key light (r185 intensities ÷ π), fog behind the lot, the slab, lot, grid lines, parapet with the exit gap,
-the pulsing exit gate and seeded props. Graphics levels map the old presets (`native/quality.ts`): Low — Lambert plain blocks,
-no shadows or post; Balanced — Standard materials, detailed scene (rounded vehicles with glass cabins, axles and light bars,
+the pulsing exit gate and seeded props. Shadows, AO, bloom, grade and AA come from the engine's `levelSettings()`, the art from the old presets (`native/quality.ts`): Low — Lambert plain blocks,
+no shadows, post or anti-aliasing; Balanced — Standard materials, detailed scene (rounded vehicles with glass cabins, axles and light bars,
 the red car's stripe, asphalt / concrete grain, parapet caps, AC units, lamp posts, beacon, gate chevrons, instanced skyline),
 1024² shadows, RoomEnvironment reflections (0.45), bloom (0.4 / 0.35 / 0.92), grade, FXAA; High — clear-coated Physical paint
 and glass, 2048² shadows, GTAO, SMAA, dust motes; Ultra — 4096², full-resolution GTAO and bloom, MSAA. Dust and confetti scale
-with the level within a tier (≤ 2×, ≤ 360).
+with the level's particle budget within a tier (≤ 2×, ≤ 360).
 
 `native/audio.ts` plays the authored clips (`sfx/manifest.json`: select, move, invalid, undo, hint, win, lose on effects; click
 and pause on the interface bus) and, during a round, the lo-fi music loop and the 320 Hz noise bed, rendered once into clips on
