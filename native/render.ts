@@ -57,6 +57,7 @@ scene.add(hemi, key, key.target);
 
 // layers: 0 environment, 1 gameplay (vehicles), 2 markers / ghosts
 const LAYER_GAME = 1, LAYER_MARK = 2;
+camera.layers.enable(LAYER_GAME); camera.layers.enable(LAYER_MARK); // engine minor 35: passes honour layers (older: every visible object drew)
 
 let look: Look | null = null;
 let theme: Theme = Content.THEMES[0]!;
