@@ -5,21 +5,20 @@
 // C D E, 0.9 s a bar, a lower octave every other bar) and the quiet ambience
 // (white noise lowpassed at 320 Hz) while a round plays. The browser build
 // ran both live (an interval scheduler and a noise loop); here they are
-// rendered once into clips (createClip, a slice a frame) and looped on the
+// rendered once at start (OfflineAudioContext, one a stem) and looped on the
 // music bus (the runtime has no ambience bus; the ambience's gain folds in
 // the old ambience slider's 40 % default against music's 60 %). The
 // oscillator blips the browser build synthesized while a sample decoded are
 // not ported (a live synthesis graph makes clip loads fail on the engine's
 // web runtime), so a clip still loading is silent. The runtime's Options own
 // the volumes, the mute and the voice limit. Every clip loads at start.
-import { context, createClip, loadClip, play as playClip, type AudioClip, type Bus, type Sound } from "starhermit:audio";
+import { OfflineAudioContext, SoundBank, context, createClip, loadClip, play as playClip, type AudioClip, type Bus, type Sound } from "starhermit:audio";
 import { files } from "starhermit:engine";
 
 export type Sfx = "select" | "move" | "invalid" | "undo" | "hint" | "win" | "lose" | "click" | "pause";
 const BUS: Record<Sfx, Bus> = { select: "effects", move: "effects", invalid: "effects", undo: "effects", hint: "effects", win: "effects", lose: "effects", click: "interface", pause: "interface" };
 const byEvent = new Map<string, string[]>();
-const turn = new Map<string, number>();
-const clips = new Map<string, AudioClip>();
+const banks = new Map<string, SoundBank>();
 
 /** Reads the manifest and loads every clip at once (onStart); a sound whose clip is still loading is skipped. */
 export function loadSfx(): void {
@@ -30,22 +29,21 @@ export function loadSfx(): void {
       byEvent.set(it.event, [...(byEvent.get(it.event) ?? []), it.name]);
     }
   } catch (e) { console.warn(`sfx manifest: ${String(e)}`); }
-  for (const name of new Set([...byEvent.values()].flat())) {
-    loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); }, (e: unknown) => { console.warn(`sfx ${name}: ${String(e)}`); });
+  for (const [event, names] of byEvent) {
+    const loads = names.map((name) => loadClip(`sfx/${name}.opus`).catch((e: unknown) => { console.warn(`sfx ${name}: ${String(e)}`); return null; }));
+    void Promise.all(loads).then((loaded) => {
+      const list = loaded.filter((c) => c !== null);
+      if (list.length) banks.set(event, new SoundBank({ clips: list, order: "sequence", bus: BUS[event as Sfx] }));
+    });
   }
+  const failed = (e: unknown): void => { console.warn(`audio: ${String(e)}`); };
+  renderMusic().then((c) => { musicClip = c; }, failed);
+  renderAmbience().then((c) => { ambClip = c; }, failed);
 }
 
 /** audio.js playSfx(kind): the event's next clip. */
 export function play(kind: Sfx): void {
-  const names = byEvent.get(kind);
-  if (!names || !names.length) return;
-  const i = ((turn.get(kind) ?? 0) + 1) % names.length;
-  turn.set(kind, i);
-  const name = names[i]!;
-  const clip = clips.get(name);
-  if (!clip) return;
-  try { playClip(clip, { bus: BUS[kind] }); }
-  catch { /* the mixer is full this frame: skip it */ }
+  try { banks.get(kind)?.play(); } catch { /* the mixer is full this frame: skip it */ }
 }
 
 // -- the music and the ambience -----------------------------------------------------------------
@@ -53,49 +51,38 @@ const RATE = 22050;
 const PATTERN = [196, 247, 294, 247, 220, 262, 294, 330]; // G B D B A C D E
 const BAR = 0.9;
 const MUSIC_N = Math.round(RATE * BAR * PATTERN.length);
-const music = new Float32Array(MUSIC_N);
 /** audio.js tone(): a sine from 0.0001 up to `peak` in 12 ms, then exponentially down to 0.0001 at `dur`. */
 const notes: { start: number; f: number; dur: number; peak: number }[] = [];
 PATTERN.forEach((f, bar) => {
   notes.push({ start: bar * BAR, f, dur: 0.9, peak: 0.16 });
   if (bar % 2 === 0) notes.push({ start: bar * BAR, f: f / 2, dur: 1.6, peak: 0.12 });
 });
-let noteAt = 0;
-function renderMusic(): boolean {
-  const n = notes[noteAt];
-  if (!n) return true;
-  const s0 = Math.round(n.start * RATE), len = Math.round((n.dur + 0.02) * RATE);
-  for (let i = 0; i < len; i++) {
-    const t = i / RATE;
-    const env = t < 0.012 ? 0.0001 * Math.pow(n.peak / 0.0001, t / 0.012) : t < n.dur ? n.peak * Math.pow(0.0001 / n.peak, (t - 0.012) / (n.dur - 0.012)) : 0;
-    const k = (s0 + i) % MUSIC_N; // a tail past the loop's end wraps to its start
-    music[k] = music[k]! + Math.sin(2 * Math.PI * n.f * t) * env;
+const TAIL_N = Math.round(RATE * 0.05);
+async function renderMusic(): Promise<AudioClip> {
+  const off = new OfflineAudioContext(1, MUSIC_N + TAIL_N, RATE);
+  for (const n of notes) {
+    const osc = off.createOscillator(); osc.frequency.value = n.f;
+    const g = off.createGain();
+    g.gain.setValueAtTime(0.0001, n.start); g.gain.exponentialRampToValueAtTime(n.peak, n.start + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, n.start + n.dur);
+    osc.connect(g).connect(off.destination); osc.start(n.start); osc.stop(n.start + n.dur);
   }
-  noteAt++;
-  return noteAt >= notes.length;
+  const data = (await off.startRendering()).getChannelData(0);
+  const out = data.slice(0, MUSIC_N);
+  for (let i = 0; i < TAIL_N; i++) out[i]! += data[MUSIC_N + i]!; // a tail past the loop's end wraps to its start
+  return createClip([out], RATE);
 }
-const AMB_N = RATE * 2;
-const amb = new Float32Array(AMB_N);
-let ambPos = 0, ambS = 11, ambY = 0;
-/** audio.js startAmbience: 2 s of white noise, a 320 Hz lowpass run twice round so the loop joins. */
-function renderAmbience(count: number): boolean {
-  const k = 1 - Math.exp((-2 * Math.PI * 320) / RATE);
-  const end = Math.min(2 * AMB_N, ambPos + count);
-  for (; ambPos < end; ambPos++) {
-    const i = ambPos % AMB_N;
-    if (ambPos < AMB_N) {
-      ambS = (Math.imul(ambS, 1664525) + 1013904223) >>> 0;
-      amb[i] = (ambS / 4294967296) * 2 - 1;
-    } else {
-      ambY += k * (amb[i]! - ambY);
-      amb[i] = ambY;
-    }
-  }
-  return ambPos >= 2 * AMB_N;
+/** audio.js startAmbience: 2 s of white noise, a 320 Hz lowpass; filtered periodic noise is periodic once settled, so the loop joins. */
+async function renderAmbience(): Promise<AudioClip> {
+  const n = RATE * 2, settle = Math.round(0.25 * RATE);
+  const off = new OfflineAudioContext(1, settle + n, RATE);
+  const noise = off.createNoise({ seed: 11, seconds: 2 });
+  const lp = off.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 320;
+  noise.connect(lp).connect(off.destination); noise.start();
+  const r = await off.startRendering();
+  return createClip([r.getChannelData(0).slice(settle)], RATE);
 }
 let musicClip: AudioClip | null = null, ambClip: AudioClip | null = null;
 let musicVoice: Sound | null = null, ambVoice: Sound | null = null;
-let rendered = false;
 let playing = false;
 /** The bed's 0.25 gain at the old ambience slider's 40 % default, on the music bus (60 % default). */
 const AMB_GAIN = 0.25 * (0.4 / 0.6);
@@ -116,28 +103,11 @@ export function setPlaying(on: boolean): void {
   } catch { /* gone */ }
 }
 
-/** Each frame, once the mixer runs: the loops rendered a slice a frame, then started. */
+/** Each frame, once the mixer runs: the rendered loops start. */
 export function update(): void {
-  if (context.state !== "running") return;
-  if (!rendered) {
-    if (!musicClip) {
-      if (!renderMusic()) return;
-      try { musicClip = createClip([music], RATE); } catch (e) { console.warn(`audio: ${String(e)}`); rendered = true; }
-      return;
-    }
-    if (!ambClip) {
-      if (!renderAmbience(8000)) return;
-      try { ambClip = createClip([amb], RATE); } catch (e) { console.warn(`audio: ${String(e)}`); }
-      rendered = true;
-      return;
-    }
-  }
-  if (!playing) return;
-  if (musicClip && !musicVoice) {
-    try { musicVoice = playClip(musicClip, { bus: "music", loop: true }); } catch { musicVoice = null; }
-    return;
-  }
-  if (ambClip && !ambVoice) {
-    try { ambVoice = playClip(ambClip, { bus: "music", gain: AMB_GAIN, loop: true }); } catch { ambVoice = null; }
-  }
+  if (context.state !== "running" || !playing) return;
+  try {
+    if (musicClip && !musicVoice) musicVoice = playClip(musicClip, { bus: "music", loop: true });
+    if (ambClip && !ambVoice) ambVoice = playClip(ambClip, { bus: "music", gain: AMB_GAIN, loop: true });
+  } catch { /* the mixer is full this frame: next frame */ }
 }

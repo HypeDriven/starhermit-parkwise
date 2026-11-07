@@ -59,7 +59,6 @@ export const app = {
   /** Signed in: the board's top ten for the results (undefined: loading). */
   board: undefined as platform.Row[] | null | undefined,
   caption: null as { key: string; until: number } | null,
-  toast: null as { text: () => string; until: number } | null,
   /** A Daily or Practice lot being generated on the worker. */
   preparing: null as { cancel: () => void } | null,
   hintPending: null as { cancel: () => void } | null,
@@ -76,7 +75,9 @@ export function announce(text: string): void {
   lastAnnounce = t;
   ui.announce(t.slice(0, 500));
 }
-export function toast(text: () => string): void { app.toast = { text, until: now() + 3.2 }; announce(text()); }
+export function toast(text: () => string): void {
+  ui.toast!(text(), { duration: 3.2, style: ["toast", "toast-text"], dismissible: false, position: "bottom", anchor: "center", offset: 0 });
+}
 /** audio.js captions: text cues for meaningful sounds (Settings › Text captions for sounds). */
 const CAPTIONS: Partial<Record<audio.Sfx, string>> = {
   select: N("Vehicle selected"), move: N("Vehicle slid"), invalid: N("That move is blocked"), undo: N("Move undone"),
@@ -565,7 +566,6 @@ onUpdate((dt) => {
   audio.update();
   const t = now();
   if (app.caption && app.caption.until < t) app.caption = null;
-  if (app.toast && app.toast.until < t) app.toast = null;
 });
 const pending: (() => void)[] = [];
 /** A widget's press, run once the frame's UI is built (state changes mid-build would break later widgets). */

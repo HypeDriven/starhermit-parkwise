@@ -33,10 +33,8 @@ import {
 // ------------------------------------------------------------------ layout
 interface Layout { lw: number; lh: number; sc: number; wide: boolean; phone: boolean; short: boolean }
 function layoutNow(): Layout {
-  const f = frame();
-  const sc = ui.preferences().scale;
-  const sa = f.safeArea;
-  const lw = Math.max(1, (f.width - sa.left - sa.right) / sc), lh = Math.max(1, (f.height - sa.top - sa.bottom) / sc);
+  const v = ui.viewport!();
+  const lw = Math.max(1, v.width), lh = Math.max(1, v.height), sc = v.scale;
   return { lw, lh, sc, wide: lw >= 1024, phone: lw <= 700 && lh > lw, short: lh <= 500 && lw > lh };
 }
 const lastSize = new Map<string, number>();
@@ -364,15 +362,7 @@ function playScreen(L: Layout): void {
     ui.place("caption", { anchor: "bottom", y: trayH + 70 }, () =>
       ui.column("caption-col", () => ui.style("caption-text").id("caption-line").label(T(app.caption!.key)), { style: "caption", align: "center" }));
   }
-  toastBox(L);
 }
-function toastBox(L: Layout): void {
-  if (!app.toast) return;
-  const w = Math.min(L.lw * 0.9, 420);
-  ui.place("sh-toast", { anchor: "bottom", y: 16 }, () =>
-    ui.column("sh-toast-col", () => para(app.toast!.text(), w - 34, "toast-text", "sh-toast-text"), { style: "toast", align: "center" }));
-}
-
 function rail(id: string, anchor: "top-start" | "top-end", topY: number, w: number, h: number, build: (w: number) => void): void {
   const inner = w - 20;
   const scroll = (lastSize.get(id) ?? 0) > h - 20;

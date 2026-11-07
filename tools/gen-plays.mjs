@@ -15,9 +15,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const req = createRequire(join(root, 'package.json'));
 const R = req('./rules.js');
 const C = req('./content.js');
-const I = req('./i18n.js');
-I.setLocale('en-US');
-const T = I.T;
+const T = (key, vars) => String(key).replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] != null ? String(vars[k]) : m));
 
 function solution(level) {
   let s = R.makeState(level);

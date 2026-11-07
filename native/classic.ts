@@ -4,15 +4,10 @@
 // BFS solver, integer scoring, hashes and replays), the precomputed lots
 // (levels.js) and the content (content.js: lessons, the 40 Journey stages,
 // challenges, the Daily and Practice lots, themes), the progress document
-// and the game's options (progress.js), the string tables (locales/*.js
-// through i18n.js) and the account strings (sh-strings.js).
+// and the game's options (progress.js).
 import { loadClassic } from "starhermit:script";
 
-for (const f of [
-  "rules.js", "levels.js", "content.js", "progress.js",
-  "locales/en-GB.js", "locales/es.js", "locales/de.js", "locales/fr.js", "locales/pt.js", "locales/it.js",
-  "i18n.js", "sh-strings.js",
-]) loadClassic(f);
+for (const f of ["rules.js", "levels.js", "content.js", "progress.js"]) loadClassic(f);
 
 // -- The shapes this client reads -------------------------------------------------
 export type Ori = "h" | "v";
@@ -68,23 +63,9 @@ interface ProgressApi {
   same(a: unknown, b: unknown): boolean; pickOption(key: string, v: unknown): Options[keyof Options] | undefined;
   readForeign(text: string | null): { progress: Progress | null; options: Partial<Options> } | null;
 }
-interface I18nApi {
-  LOCALES: string[];
-  T(key: string, vars?: Record<string, string | number> | null): string;
-  setLocale(tag: string): void;
-  lang(): string;
-}
-export interface AccountStrings {
-  signIn: string; invite: string; copied: string; copyFailed: string; signedOut: string;
-  lbPosting: string; lbRank: string; lbPosted: string; lbNotPosted: string;
-}
-
 const g = globalThis as unknown as {
-  PARKWISE_RULES: RulesApi; PARKWISE_CONTENT: ContentApi; PARKWISE_PROGRESS: ProgressApi; PARKWISE_I18N: I18nApi;
-  PARKWISE_SH_STRINGS: Record<string, AccountStrings>;
+  PARKWISE_RULES: RulesApi; PARKWISE_CONTENT: ContentApi; PARKWISE_PROGRESS: ProgressApi;
 };
 export const Rules = g.PARKWISE_RULES;
 export const Content = g.PARKWISE_CONTENT;
 export const Prog = g.PARKWISE_PROGRESS;
-export const I18n = g.PARKWISE_I18N;
-export const ShStrings = g.PARKWISE_SH_STRINGS;
