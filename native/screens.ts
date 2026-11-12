@@ -1,3 +1,7 @@
+import { localizedStyle as __l10nStyle } from "./l10n/font.ts";
+import { localizedDrawOptions as __l10nDrawOptions } from "./l10n/font.ts";
+// localization-runtime:attached
+import { openLocalizedOptions as __l10nOptions } from "./l10n/menu.ts";
 // The browser build's DOM shell (index.html + main.js ui/screens wiring) as
 // starhermit:ui, built every frame over the lot: the title page over its dusk
 // sky and rooftop skyline (Play, Daily challenge, Journey, Settings, How to
@@ -16,7 +20,25 @@
 // rectangle left between them (main.ts view → render.ts). Every vehicle and
 // every legal-target marker on the lot is a named target (ui.target), as the
 // screen-reader board model was, so screen readers and play scripts find them.
-import { frame, openMenu } from "starhermit:engine";
+// The browser build's DOM shell (index.html + main.js ui/screens wiring) as
+// starhermit:ui, built every frame over the lot: the title page over its dusk
+// sky and rooftop skyline (Play, Daily challenge, Journey, Settings, How to
+// play, sign-in / invite, the profile line), the mode list and the setup
+// lists (lessons, the 40 stages with stars and locks, the Daily, Practice
+// difficulties, challenges, Score chase seeds), and the play screen — the
+// status bar (mode, moves / par, time, the challenge's limit chip, Pause),
+// the Objective / Progress / Vehicles rail (the vehicles as buttons: the
+// screen-reader board model), the Actions / Session rail, the tray (Undo,
+// Hint, Restart; mirrored for the left-handed tray), the sound caption and
+// the toast — with the pause, results, settings and help overlays. The old
+// media queries are layouts picked by the window's logical size: wide
+// (≥ 1024 px: both rails beside the lot) and compact (the rails become
+// drawers behind ☰ and ⚙, a scrim closes them; portrait phones share the
+// tray between its three buttons). The lot is framed in the playfield
+// rectangle left between them (main.ts view → render.ts). Every vehicle and
+// every legal-target marker on the lot is a named target (ui.target), as the
+// screen-reader board model was, so screen readers and play scripts find them.
+import { frame } from "starhermit:engine";
 import { bindings, requestRebind } from "starhermit:input";
 import * as draw from "starhermit:draw";
 import * as ui from "starhermit:ui";
@@ -52,15 +74,15 @@ function button(b: Btn, width: number | null = null): void {
   if (b.selected) opts.selected = true;
   const s: ui.Style = width != null ? { width } : {};
   if (b.name && b.name !== b.text) {
-    opts.content = () => { ui.style({ text: { weight: "600" } }).label(b.text); };
+    opts.content = () => { ui.style(__l10nStyle({ text: { weight: "600" } })).label(b.text); };
   } else if (width != null && buttonWidth(b.text, style) > width) {
     // the face's padding and border (.btn 24 px a side, the tray's 8, .vehicle-btn 10 + its 2 px ring)
     const pad = PAD[style] ?? 52;
     const inner = Math.max(20, width - pad);
     const plain = style === "vehicle-btn";
-    opts.content = () => { ui.style({ text: plain ? { align: "start", size: 13.6 } : { align: "center", weight: "700" } }).paragraph(b.text, inner); };
+    opts.content = () => { ui.style(__l10nStyle({ text: plain ? { align: "start", size: 13.6 } : { align: "center", weight: "700" } })).paragraph(b.text, inner); };
   }
-  if (ui.style(style, s).id(b.id).button(b.name ?? b.text, opts) && fresh()) later(b.act);
+  if (ui.style(__l10nStyle(style), __l10nStyle(s)).id(b.id).button(b.name ?? b.text, opts) && fresh()) later(b.act);
 }
 /** Buttons at their own widths in centred rows that wrap at `width` (.btn-row: flex-wrap, gap 12). */
 function flow(label: string, list: Btn[], width: number, gap = 12, justify: "start" | "center" | "end" = "center"): ui.Rect {
@@ -71,14 +93,14 @@ function flow(label: string, list: Btn[], width: number, gap = 12, justify: "sta
 /** Text up to `width` wide: one label when it fits, else a paragraph. */
 function para(text: string, width: number, cls = "text", id?: string): void {
   if (!text) return;
-  let u = ui.style(cls);
+  let u = ui.style(__l10nStyle(cls));
   if (id) u = u.id(id);
   if (textWidth(text, cls) <= width) u.label(text);
   else u.paragraph(text, Math.max(20, width));
 }
 function heading(cls: string, text: string, width: number, id?: string): void {
   if (textWidth(text, cls, "heading") <= width) (id ? ui.id(id) : ui).style(cls).heading(text);
-  else ui.style(cls).paragraph(text, width);
+  else ui.style(__l10nStyle(cls)).paragraph(text, width);
 }
 function rect(r: ui.Rect): void { hudRects.push({ x: r.x, y: r.y, width: r.width, height: r.height }); }
 /** A box over a window rectangle (window px) in a class, drawn as a placed role-none widget. */
@@ -173,7 +195,7 @@ function page(L: Layout): void {
 }
 function titlePage(w: number): void {
   const p = platform.progress();
-  ui.style("brand").id("title-h").label("Parkwise");
+  ui.style(__l10nStyle("brand")).id("title-h").label("Parkwise");
   para(T("A rooftop parking puzzle. Slide vehicles along the way they face and open a path so the red car can reach the exit gate."), Math.min(w, 620), "tagline", "tagline");
   button({ id: "btn-play", text: T("Play"), style: "btn-primary", act: () => setPage("modes") });
   flow("title-row1", [
@@ -208,7 +230,7 @@ function menuItem(id: string, w: number, title: string, desc: string | null, met
     }, { spacing: 12, align: "center", width: w - 40 }),
   };
   if (disabled) opts.disabled = true;
-  if (ui.style("menu-item", { width: w }).id(id).button(title, opts) && fresh() && !disabled) later(act);
+  if (ui.style(__l10nStyle("menu-item"), __l10nStyle({ width: w })).id(id).button(title, opts) && fresh() && !disabled) later(act);
 }
 function modesPage(w: number): void {
   const p = platform.progress();
@@ -324,7 +346,7 @@ function playScreen(L: Layout): void {
     ui.column("statusbar-col", () => {
       rows.forEach((row, ri) => ui.row(`status-r${ri}`, () => {
         for (const it of row) {
-          if (it.kind === "chip") ui.column(it.id, () => ui.style(chipCls).id(`${it.id}-t`).label(it.text), { style: "chip" });
+          if (it.kind === "chip") ui.column(it.id, () => ui.style(__l10nStyle(chipCls)).id(`${it.id}-t`).label(it.text), { style: "chip" });
           else button(it.b!);
         }
       }, { spacing: gap, align: "center", justify: "center", width: L.lw - 24 }));
@@ -360,7 +382,7 @@ function playScreen(L: Layout): void {
   // ---- caption and toast
   if (app.caption && !app.overlays.length) {
     ui.place("caption", { anchor: "bottom", y: trayH + 70 }, () =>
-      ui.column("caption-col", () => ui.style("caption-text").id("caption-line").label(T(app.caption!.key)), { style: "caption", align: "center" }));
+      ui.column("caption-col", () => ui.style(__l10nStyle("caption-text")).id("caption-line").label(T(app.caption!.key)), { style: "caption", align: "center" }));
   }
 }
 function rail(id: string, anchor: "top-start" | "top-end", topY: number, w: number, h: number, build: (w: number) => void): void {
@@ -574,7 +596,7 @@ function toggle(id: string, label: string, on: boolean, w: number, set: (v: bool
         const s = st.scale, box = 22 * s, bx = r.x + (r.width - box) / 2, by = r.y + (r.height - box) / 2;
         draw.roundRect(bx, by, box, box, 4, on ? "#e86a3c" : "#1b2740");
         draw.strokeRoundRect(bx, by, box, box, 4, "#9fb2c8", 1);
-        if (on) draw.text("✓", bx + box / 2, by + 1 * s, { size: 17 * s, color: "#ffffff", align: "center", weight: "bold" });
+        if (on) draw.text("✓", bx + box / 2, by + 1 * s, __l10nDrawOptions({ size: 17 * s, color: "#ffffff", align: "center", weight: "bold" }));
       },
     });
     if (res.activated && fresh()) later(() => set(!on));
@@ -584,7 +606,7 @@ function settingsBody(w: number): void {
   const o = platform.options;
   para(T("Sound, graphics, language, larger text, high contrast and reduced motion are in the StarHermit Options."), w, "dim", "options-note");
   flow("settings-runtime", [
-    { id: "btn-options", text: T("Open Options"), act: () => openMenu() },
+    { id: "btn-options", text: T("Open Options"), act: () => __l10nOptions() },
     { id: "btn-rebind", text: T("Key bindings"), act: () => requestRebind() },
   ], w, 12, "start");
   heading("section-h3", T("Theme"), w);

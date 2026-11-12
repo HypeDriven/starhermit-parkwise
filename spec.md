@@ -127,3 +127,11 @@ the music bus.
 - The browser build's dev-server score submission (name field, replay validation) is not part of the engine client.
 - Signed-in paths (cloud merge, foreign save, score posting) are covered by unit tests, not live-tested here.
 - The old Graphics panel's per-effect overrides are replaced by the runtime's graphics levels.
+
+<!-- regional-localization:start -->
+
+### Regional interface languages
+
+The string tables include complete regional variants for `fr-BE`, `de-BE`, `en-SG`, `en-HK`, `en-BQ`, `es-CO`, `de-IT`, `fr-IT`, `es-CL`, `es-AR`, `es-EC`, `de-BR`. These reuse the corresponding existing translations in their language family. The runtime can resolve the exact regional tag. Language selection is available from the game’s Options panel or F2 and is saved per player in `ui.language`. Changes apply during play. Additional national, regional and indigenous language packs are only shipped once every English message has a translation with intact placeholders and markup. Complete additional language tables: `ja-JP`, `zh-SG`, `ms-SG`, `zh-HK`, `yue-HK`, `fi-FI`, `sv-FI`, `et-EE`, `id-ID`, `vi-VN`, `ta-SG`, `da-DE`, `nl-BE`, `lb-BE`, `co-FR`, `eu-FR`, `ca-FR`, `oc-FR`, `nl-NL`, `sl-IT`, `ca-IT`, `oc-IT`, `ca-ES`, `eu-ES`, `gl-ES`, `su-ID`, `bew-ID`, `km-VN`, `ru-FI`, `ru-EE`, `fur-IT`.
+
+<!-- regional-localization:end -->
