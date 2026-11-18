@@ -122,7 +122,7 @@ export function keysFor(action: string): string {
 function withKey(key: string, action: string): string { return `${T(key).replace(/\s*\([^)]*\)\s*$/, "")} (${keysFor(action)})`; }
 
 // ------------------------------------------------------------------ the frame
-export function drawScreens(): void {
+function drawScreensImmediate(): void {
   const L = layoutNow();
   if (app.page === "game") playScreen(L);
   else page(L);
@@ -635,4 +635,11 @@ function helpBody(w: number): void {
   heading("section-h3", T("Scoring"), w);
   para(T("Score combines a completion base, a bonus for beating the move par, a time bonus, and penalties for hints and blocked attempts. Fewer moves and faster solves score higher."), w, "dim");
   button({ id: "btn-help-close", text: T("Close"), style: "btn-primary", act: closeTop });
+}
+
+export function drawScreens(): void {
+  if (!(app.overlays.includes("help"))) { drawScreensImmediate(); return; }
+  const actions = ["left","right","up","down","next_vehicle","undo","hint","restart","camera","pause","menu"];
+  const version = JSON.stringify([(app as any).settings ?? (app as any).options ?? {}, (platform as any).options ?? {}, actions.map((action) => bindings(action))]);
+  ui.retain!("help-screen", version, drawScreensImmediate);
 }

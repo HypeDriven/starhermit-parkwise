@@ -1,7 +1,7 @@
 # Parkwise — Game Specification
 
 **Genre:** sliding-block parking puzzle · **Players:** 1 (asynchronous leaderboard) · **Platform:** a StarHermit engine script game
-(engine 1.39.0, host API 1.39), played natively by the StarHermit client and in browsers by the engine's web runtime.
+(engine 1.44.1, host API 1.44), played natively by the StarHermit client and in browsers by the engine's web runtime.
 
 Parkwise is a rooftop parking diorama: slide cars and vans along the way they face until the red car can drive out through the
 glowing exit gate on the right edge of the lot.
@@ -135,3 +135,9 @@ the music bus.
 The string tables include complete regional variants for `fr-BE`, `de-BE`, `en-SG`, `en-HK`, `en-BQ`, `es-CO`, `de-IT`, `fr-IT`, `es-CL`, `es-AR`, `es-EC`, `de-BR`. These reuse the corresponding existing translations in their language family. The runtime can resolve the exact regional tag. Language selection is available from the game’s Options panel or F2 and is saved per player in `ui.language`. Changes apply during play. Additional national, regional and indigenous language packs are only shipped once every English message has a translation with intact placeholders and markup. Complete additional language tables: `ja-JP`, `zh-SG`, `ms-SG`, `zh-HK`, `yue-HK`, `fi-FI`, `sv-FI`, `et-EE`, `id-ID`, `vi-VN`, `ta-SG`, `da-DE`, `nl-BE`, `lb-BE`, `co-FR`, `eu-FR`, `ca-FR`, `oc-FR`, `nl-NL`, `sl-IT`, `ca-IT`, `oc-IT`, `ca-ES`, `eu-ES`, `gl-ES`, `su-ID`, `bew-ID`, `km-VN`, `ru-FI`, `ru-EE`, `fur-IT`.
 
 <!-- regional-localization:end -->
+
+## Engine 1.44.1
+
+Browser play uses the WebGPU-only StarHermit 1.44.1 web runtime. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
+
+The help screen replays through retained native UI while its contents, options, layout and key bindings are unchanged.
