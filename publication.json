@@ -12,7 +12,7 @@
     "metadataSource": "starhermit.txt",
     "createdAt": "2026-09-01T07:01:05.305492+00:00",
     "coverArtSource": "manifest",
-    "coverArtUpdatedAt": "2026-11-18T17:52:17.396303+00:00",
+    "coverArtUpdatedAt": "2026-11-22T14:25:34.986892+00:00",
     "submittedByUserId": "2712e04e-461b-4d23-81ae-e40b429128a8",
     "submittedByUsername": "starhermit",
     "hosting": {
@@ -22,9 +22,9 @@
       "pinnedCommitSha": null,
       "deployedCommitSha": null,
       "deployError": null,
-      "deployedAt": "2026-11-18T17:52:17.385597+00:00",
+      "deployedAt": "2026-11-22T14:25:34.974397+00:00",
       "externalLaunchUrl": null,
-      "engineVersion": "1.44.1",
+      "engineVersion": "1.47.0",
       "deployWarning": null
     },
     "description": "Slide cars and trucks along their lanes to open an escape route for the target vehicle.",
@@ -36,19 +36,19 @@
     "links": [],
     "isDisabled": false
   },
-  "publishedAt": "2026-11-18T17:52:17.409Z",
-  "sourceCommit": "00379f34f7a31a71d6392c0da6bd746f2a2b80a3",
-  "bytesReceived": 1436118,
-  "archiveSha256": "0518d46a3a642cb5996cb8b10c9d20490a989e4a8bbece52baa5a94a74696657",
+  "publishedAt": "2026-11-22T14:25:35.336Z",
+  "sourceCommit": "43fcf0e9aced15c3a3b6fc7a9db5f93192d46b88",
+  "bytesReceived": 1436280,
+  "archiveSha256": "2777b933b20d3a1f3ba852b96f7fd28fb48bbddc1e88dfe938248796bfd00143",
   "indexSha256": "f49f4244139ef22598d46522dcc53118b58b949fdd0d760ae426c135f5c376f4",
   "result": {
     "clientPublished": true,
     "serverImageLoaded": false,
     "imageDigest": null,
-    "bytesReceived": 1436118,
+    "bytesReceived": 1436280,
     "mode": "replace",
     "filesRemoved": 0,
-    "engineVersion": "1.44.1",
+    "engineVersion": "1.47.0",
     "deployWarning": null
   },
   "liveVerification": {
