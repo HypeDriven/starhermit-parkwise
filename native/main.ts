@@ -20,8 +20,8 @@ import { withLanguageRender as __l10nRender } from "./l10n/menu.ts";
 // game, a hidden window and slow frames never move it and play scripts
 // replay exactly.
 import "./classic.ts";
-import { clipboard, frame, levelSettings, onFixedUpdate, onPreferencesChange, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate } from "starhermit:engine";
-import { onAction, onPointerButton, onPointerMove, onTouch } from "starhermit:input";
+import { clipboard, frame, levelSettings, onFixedUpdate, onPreferencesChange, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate, setTargetFps } from "starhermit:engine";
+import { onAction, onPointerButton, onPointerMove, onTouch, primaryPointer } from "starhermit:input";
 import * as ui from "starhermit:ui";
 import { onSessionEnded, requestSignIn } from "starhermit:platform";
 import { Content, Rules, type Entry, type Move, type Score, type State } from "./classic.ts";
@@ -562,9 +562,20 @@ onSuspend(() => {
 onResume(() => { hidden = false; if (app.phase === "active" && !app.overlays.length) audio.setPlaying(true); });
 
 let frameDt = 0;
+/** The game's frame cap (host API 1.49 setTargetFps, set only on a change): 30 on the title (its page covers the window and the lot does not draw there)
+ * and on phone levels (levelIndex <= 3) under a finger; none otherwise. The round clock stays 60 fixed
+ * steps a second. */
+let frameCap = -1;
+function capFrames(): void {
+  const cap = app.page === "title" || (frame().levelIndex <= 3 && primaryPointer() === "coarse") ? 30 : 0;
+  if (cap === frameCap) return;
+  frameCap = cap;
+  setTargetFps(cap || null);
+}
 onUpdate((dt) => {
   frameDt = dt;
   applyLook();
+  capFrames();
   applyPalette(ui.preferences().highContrast);
   audio.update();
   const t = now();

@@ -468,6 +468,8 @@ function buildBoard(): void {
       grp.add(prop);
     }
   }
+  // Still scenery (host API 1.49): everything placed so far but the dust; the ring, vehicles, markers and confetti stay unset.
+  for (const o of grp.children) if (o !== ambient?.dust) o.movable = false;
   // selection ring
   selectRing = new Mesh(new RingGeometry(0.62, 0.78, 32), new MeshBasicMaterial({ color: 0xffd54f, side: DoubleSide, transparent: true, opacity: 0.95 }));
   selectRing.rotation.x = -PI / 2;
